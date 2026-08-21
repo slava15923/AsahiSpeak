@@ -1,4 +1,5 @@
 build/
+.vscode/
 .DS_Store
 Thumbs.db
 *.log
@@ -7,4 +8,3 @@ Thumbs.db
 *.swo
 .env
 .secrets
-.vscode/
