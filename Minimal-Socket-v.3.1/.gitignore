@@ -1,0 +1,6 @@
+bin
+build
+.vscode
+*.log
+test.html
+TODO

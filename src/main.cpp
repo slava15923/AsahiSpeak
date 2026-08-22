@@ -11,6 +11,7 @@
 
 #include <cstdarg>
 #include <cstdio>
+#include "LockFreeRingBuffer.hpp"
 
 
 
@@ -26,60 +27,11 @@ const int SAMPLE_RATE = 44100;
 
 const size_t RING_SIZE = SAMPLE_RATE * 5;  // 220500 фреймов
 
-class LockFreeRingBuffer {
-public:
-    LockFreeRingBuffer(size_t capacity_frames)
-        : capacity(capacity_frames), buffer(new float[capacity_frames]) {
-        read_idx.store(0, std::memory_order_relaxed);
-        write_idx.store(0, std::memory_order_relaxed);
-    }
-    ~LockFreeRingBuffer() = default;
 
-    // Возвращает количество реально записанных фреймов
-    size_t write(const float* src, size_t frames) {
-        size_t w = write_idx.load(std::memory_order_relaxed);
-        size_t r = read_idx.load(std::memory_order_acquire);
-        size_t used = (w >= r) ? (w - r) : (capacity - r + w);
-        size_t free_space = capacity - used;
-        size_t to_write = (frames < free_space) ? frames : free_space;
-        if (to_write == 0) return 0;
 
-        size_t first_part = capacity - w;
-        size_t copy = (to_write < first_part) ? to_write : first_part;
-        memcpy(buffer.get() + w, src, copy * sizeof(float));
-        if (to_write > copy) {
-            memcpy(buffer.get(), src + copy, (to_write - copy) * sizeof(float));
-        }
-        write_idx.store((w + to_write) % capacity, std::memory_order_release);
-        return to_write;
-    }
-
-    // Возвращает количество реально прочитанных фреймов
-    size_t read(float* dst, size_t frames) {
-        size_t r = read_idx.load(std::memory_order_relaxed);
-        size_t w = write_idx.load(std::memory_order_acquire);
-        size_t available = (w >= r) ? (w - r) : (capacity - r + w);
-        size_t to_read = (frames < available) ? frames : available;
-        if (to_read == 0) return 0;
-
-        size_t first_part = capacity - r;
-        size_t copy = (to_read < first_part) ? to_read : first_part;
-        memcpy(dst, buffer.get() + r, copy * sizeof(float));
-        if (to_read > copy) {
-            memcpy(dst + copy, buffer.get(), (to_read - copy) * sizeof(float));
-        }
-        read_idx.store((r + to_read) % capacity, std::memory_order_release);
-        return to_read;
-    }
-
-private:
-    const size_t capacity;
-    std::unique_ptr<float[]> buffer;
-    std::atomic<size_t> read_idx;
-    std::atomic<size_t> write_idx;
-};
 
 LockFreeRingBuffer recordBuffer(RING_SIZE);
+
 
 
 extern "C" void state_cb(cubeb_stream *stream, void *user_ptr, cubeb_state state) {
@@ -87,6 +39,8 @@ extern "C" void state_cb(cubeb_stream *stream, void *user_ptr, cubeb_state state
     //return CUBEB_OK;
 }
 
+
+/*НЕ РАБОТАЕТ!!! функцию написала ии*/
 extern "C" long data_fullduplex(cubeb_stream * stm, void * user,
              const void * input_buffer,  // Данные с микрофона
              void * output_buffer,       // Буфер для заполнения (динамики)
@@ -102,7 +56,7 @@ extern "C" long data_fullduplex(cubeb_stream * stm, void * user,
     return nframes;
 }
 
-
+/*функция для работы с МОНО микрофоном в cubeb*/
 extern "C" long data_micro(cubeb_stream * stm, void * user,
              const void * input_buffer,  // Данные с микрофона
              void * output_buffer,       // Буфер для заполнения (динамики)
@@ -114,6 +68,7 @@ extern "C" long data_micro(cubeb_stream * stm, void * user,
     return nframes; // Возвращаем количество обработанных кадров
 }
 
+/*функция для работы с МОНО динамиками в cubeb*/
 extern "C" long data_dinamic(cubeb_stream * stm, void * user,
              const void * input_buffer,  // Данные с микрофона
              void * output_buffer,       // Буфер для заполнения (динамики)
@@ -144,7 +99,32 @@ extern "C" void cubebCallback(const char *fmt, ...) {
     fprintf(stderr, "Cubeb Log: %s\n", buffer);
 }
 
-int main() {
+
+void printHelp() {
+std::string helpText = "-help - help command";
+
+    std::cout << helpText << std::endl;
+}
+
+int main(int argc, char* argv[]) {
+
+    std::cout << "Всего аргументов: " << argc << std::endl;
+
+    // Вывод всех аргументов циклами
+    for (int i = 0; i < argc; ++i) {
+        std::cout << "Аргумент " << i << ": " << argv[i] << std::endl;
+    }
+
+    // Проверка и получение конкретного аргумента
+    if (argc > 1) {
+        std::cout << "Первый параметр пользователя: " << argv[1] << std::endl;
+    }
+
+    if(argc == 2 && argv[1] == "-help") {
+        printHelp();
+        return 0;
+    }
+
     std::cout << "hello world" << std::endl;
 
     uint32_t rate;
@@ -165,19 +145,19 @@ int main() {
 
     
 
-    // Параметры ВЫХОДА (динамики)
+    // Параметры ВЫХОДА
     cubeb_stream_params output_params;
-    output_params.format = CUBEB_SAMPLE_FLOAT32NE; // Используем 32-битный float[reference:13]
-    output_params.rate = rate;                    // Устанавливаем полученную частоту[reference:14]
-    output_params.channels = 1;                   // Стерео[reference:15]
-    output_params.layout = CUBEB_LAYOUT_UNDEFINED;// Не указываем строгую схему каналов[reference:16]
-    output_params.prefs = CUBEB_STREAM_PREF_NONE; // Без дополнительных предпочтений[reference:17]
+    output_params.format = CUBEB_SAMPLE_FLOAT32NE; 
+    output_params.rate = rate;                    
+    output_params.channels = 1;                  
+    output_params.layout = CUBEB_LAYOUT_UNDEFINED;
+    output_params.prefs = CUBEB_STREAM_PREF_NONE; 
 
-    // Параметры ВХОДА (микрофон)
+    // Параметры ВХОДА
     cubeb_stream_params input_params;
     input_params.format = CUBEB_SAMPLE_FLOAT32NE;
     input_params.rate = rate;
-    input_params.channels = 1;                   // Моно[reference:18]
+    input_params.channels = 1;                  
     input_params.layout = CUBEB_LAYOUT_UNDEFINED;
     input_params.prefs = CUBEB_STREAM_PREF_NONE;
 
