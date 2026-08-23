@@ -1,3 +1,0 @@
-UdpResponderNonBlocking --port_A 36995 --port_B 36996
-UdpAsker --port 36995 --port_this 37005
-UdpAsker --port 36996 --port_this 37015

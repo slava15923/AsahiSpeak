@@ -4,6 +4,7 @@
 #include <condition_variable>
 #include <chrono>
 #include <cstring>
+#include "audio.hpp"
 
 class LockFreeRingBuffer {
 public:
@@ -51,7 +52,9 @@ public:
         } else {
             count.store(c + frames, std::memory_order_release);
         }
-
+        if(isNoiseGate) {
+            noisegate.processBlock(buffer.get(), frames);
+        }
         // Уведомляем ожидающий поток, что появились новые данные
         cv.notify_one();
 
@@ -118,7 +121,18 @@ public:
         return count.load(std::memory_order_acquire);
     }
 
+    // threshold - порог амплитуды (0..1), ниже которого звук глушится
+    // attackTime - время открытия в секундах (обычно 0.001–0.01)
+    // releaseTime - время закрытия в секундах (обычно 0.05–0.2)
+    // sampleRate - частота дискретизации
+    void onNoiseGate(float threshold, float attackTime, float releaseTime, float sampleRate) {
+        noisegate.init(threshold, attackTime, releaseTime, sampleRate);
+        isNoiseGate = true;
+    }
+
+
 private:
+    std::atomic<bool> isNoiseGate = false;
     const size_t capacity;
     std::unique_ptr<float[]> buffer;
     std::atomic<size_t> read_idx;
@@ -127,58 +141,5 @@ private:
 
     std::mutex cv_mutex;
     std::condition_variable cv;
+    NoiseGate noisegate;
 };
-
-/*class LockFreeRingBuffer {
-public:
-    LockFreeRingBuffer(size_t capacity_frames)
-        : capacity(capacity_frames), buffer(new float[capacity_frames]) {
-        read_idx.store(0, std::memory_order_relaxed);
-        write_idx.store(0, std::memory_order_relaxed);
-    }
-    ~LockFreeRingBuffer() = default;
-
-    // Возвращает количество реально записанных фреймов
-    size_t write(const float* src, size_t frames) {
-        size_t w = write_idx.load(std::memory_order_relaxed);
-        size_t r = read_idx.load(std::memory_order_acquire);
-        size_t used = (w >= r) ? (w - r) : (capacity - r + w);
-        size_t free_space = capacity - used;
-        size_t to_write = (frames < free_space) ? frames : free_space;
-        if (to_write == 0) return 0;
-
-        size_t first_part = capacity - w;
-        size_t copy = (to_write < first_part) ? to_write : first_part;
-        memcpy(buffer.get() + w, src, copy * sizeof(float));
-        if (to_write > copy) {
-            memcpy(buffer.get(), src + copy, (to_write - copy) * sizeof(float));
-        }
-        write_idx.store((w + to_write) % capacity, std::memory_order_release);
-        return to_write;
-    }
-
-    // Возвращает количество реально прочитанных фреймов
-    size_t read(float* dst, size_t frames) {
-        size_t r = read_idx.load(std::memory_order_relaxed);
-        size_t w = write_idx.load(std::memory_order_acquire);
-        size_t available = (w >= r) ? (w - r) : (capacity - r + w);
-        size_t to_read = (frames < available) ? frames : available;
-        if (to_read == 0) return 0;
-
-        size_t first_part = capacity - r;
-        size_t copy = (to_read < first_part) ? to_read : first_part;
-        memcpy(dst, buffer.get() + r, copy * sizeof(float));
-        if (to_read > copy) {
-            memcpy(dst + copy, buffer.get(), (to_read - copy) * sizeof(float));
-        }
-        read_idx.store((r + to_read) % capacity, std::memory_order_release);
-        return to_read;
-    }
-
-private:
-    const size_t capacity;
-    std::unique_ptr<float[]> buffer;
-    std::atomic<size_t> read_idx;
-    std::atomic<size_t> write_idx;
-    baudvine::RingBuf<float, RING_SIZE> recordBuffer;
-};*/
