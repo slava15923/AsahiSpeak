@@ -5,22 +5,21 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 set(SFML_DIR ${CMAKE_CURRENT_SOURCE_DIR}/SFML-3.1.0)
 include_directories(${SFML_DIR}/include)
 
+add_compile_definitions(WOLFSSL_DTLS_MTU)
 
-set(MINIMAL_SOCKET_BUILD_SAMPLES OFF CACHE BOOL "Disable building samples")
-#add_subdirectory(SFML-3.1.0)
 add_subdirectory(cubeb)
-add_subdirectory(libhv)
+add_subdirectory(wolfssl-5.9.2-stable)
+
 
 set(CMAKE_BUILD_TYPE Debug)
 
 add_executable(AsahiSpeak src/main.cpp)
 add_executable(AsahiSpeakServer src/server.cpp)
-add_subdirectory(wolfssl-5.9.2-stable)
 
 target_compile_features(AsahiSpeak PRIVATE cxx_std_17)
 
-target_link_libraries(AsahiSpeak PRIVATE cubeb hv wolfssl)
-target_link_libraries(AsahiSpeakServer PRIVATE hv wolfssl)
+target_link_libraries(AsahiSpeak PRIVATE cubeb wolfssl)
+target_link_libraries(AsahiSpeakServer PRIVATE wolfssl)
 
 target_include_directories(AsahiSpeak PUBLIC 
     ${PROJECT_SOURCE_DIR}/ringbuf/include

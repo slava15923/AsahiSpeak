@@ -13,13 +13,14 @@
 #include <cstdio>
 #include "LockFreeRingBuffer.hpp"
 #include "network.hpp"
+#include "AudioTransmission.hpp"
 
 
 
 
 //0,02с ЭТО 882 ФРЕЙМОВ
 
-void Network(LockFreeRingBuffer& input, LockFreeRingBuffer& output, uint port, const char* ip);
+void Network(LockFreeRingBuffer* input, LockFreeRingBuffer* output, uint port, const char* ip);
 int writeDataInSocket(WOLFSSL *ssl, LockFreeRingBuffer& recordBuffer);
 int readDataInSocket(WOLFSSL *ssl, LockFreeRingBuffer& readBuffer);
 
@@ -29,7 +30,7 @@ int readDataInSocket(WOLFSSL *ssl, LockFreeRingBuffer& readBuffer);
 
 const int SAMPLE_RATE = 44100;
 
-const size_t RING_SIZE = SAMPLE_RATE * 5;  // 220500 фреймов
+const size_t RING_SIZE = SAMPLE_RATE * 0.5;
 
 
 
@@ -110,7 +111,7 @@ std::string helpText = "-help - help command";
 int main(int argc, char* argv[]) {
     LockFreeRingBuffer recordBuffer(RING_SIZE);
     LockFreeRingBuffer readBuffer(RING_SIZE);
-    recordBuffer.onNoiseGate(1, 0.001, 0.05, SAMPLE_RATE);
+    //recordBuffer.onNoiseGate(0.1, 0.001, 0.05, SAMPLE_RATE);
 
     std::cout << "hello world" << std::endl;
 
@@ -166,7 +167,7 @@ int main(int argc, char* argv[]) {
 
     cubeb_stream_start(stm_micro);
     cubeb_stream_start(stm_dinamic);
-    Network(readBuffer,recordBuffer, 15923,"127.0.0.1");
+    Network(&readBuffer,&recordBuffer, 15923,"127.0.0.1");
 
 
 
@@ -189,72 +190,33 @@ int main(int argc, char* argv[]) {
     return 0;
 }
 
-void Network(LockFreeRingBuffer& readBuffer, LockFreeRingBuffer& recordBuffer, uint port, const char* ip) {
+void Network(LockFreeRingBuffer* readBuffer, LockFreeRingBuffer* recordBuffer, uint port, const char* ip) {
 
     #ifdef _WIN32
         WSADATA wsaData;
         WSAStartup(MAKEWORD(2, 2), &wsaData);
     #endif
 
-    int sock = create_tcp_socket();
-    struct sockaddr_in server_addr;
-    //char buffer[sizeof(networkDataAudio)];
-    //const char *msg = "Hello from WolfSSL client!\n";
+
     
     
 
     wolfSSL_Init();
-    WOLFSSL_CTX *ctx = wolfSSL_CTX_new(wolfTLSv1_2_client_method());
-    if (!ctx) error_handling("wolfSSL_CTX_new failed");
+    AudioTransmission udpClient(ip, port, "admin", "admin", 0, recordBuffer, readBuffer);
 
-    wolfSSL_CTX_load_system_CA_certs(ctx);
-    if (wolfSSL_CTX_load_verify_locations(ctx, "server-cert.pem", 0) != SSL_SUCCESS) {
-        fprintf(stderr, "Warning: CA certificates not loaded, trying without verification\n");
-        wolfSSL_CTX_set_verify(ctx, SSL_VERIFY_NONE, 0);
-    }
+    udpClient.addServerSert("server-cert.pem");
 
-    if (sock < 0) error_handling("socket creation failed");
+    udpClient.startTransmission();
 
-    server_addr.sin_family = AF_INET;
-    server_addr.sin_port = htons(port);
-    if (inet_pton(AF_INET, ip, &server_addr.sin_addr) <= 0)
-        error_handling("invalid server IP");
-
-    while (connect(sock, (struct sockaddr*)&server_addr, sizeof(server_addr)) < 0) {
-        error_handling("client connect failed");
-        std::this_thread::sleep_for(std::chrono::seconds(1));
-    }
-
-    // 4. Создание SSL-объекта и установка дескриптора
-    WOLFSSL *ssl = wolfSSL_new(ctx);
-    if (!ssl) error_handling("wolfSSL_new failed");
-    wolfSSL_set_fd(ssl, sock);
+    
 
 
-    while(wolfSSL_connect(ssl) != SSL_SUCCESS) {
-        fprintf(stderr, "wolfSSL_connect failed\n");
-        wolfSSL_free(ssl);
-        close(sock);
-        wolfSSL_CTX_free(ctx);
-        wolfSSL_Cleanup();
-        exit(EXIT_FAILURE);
-        std::this_thread::sleep_for(std::chrono::seconds(1));
-    }
-    printf("TLS handshake successful\n");
 
-    std::thread write(writeDataInSocket, ssl, std::ref(recordBuffer));
-    std::thread read(readDataInSocket, ssl, std::ref(readBuffer));
+
+
 
     getchar();
 
-    wolfSSL_free(ssl);
-    #ifdef _WIN32
-        closesocket(sock);
-        WSACleanup();
-    #else
-        close(sock);
-    #endif
-    wolfSSL_CTX_free(ctx);
     wolfSSL_Cleanup();
 }
 
@@ -264,7 +226,7 @@ int writeDataInSocket(WOLFSSL *ssl, LockFreeRingBuffer& recordBuffer) {
         dataForSend->sizeFrames = recordBuffer.readBlocking(dataForSend->frames, 882);
         if (wolfSSL_write(ssl, dataForSend, sizeof(networkDataAudio)) != (int)sizeof(networkDataAudio)) {
             fprintf(stderr, "wolfSSL_write failed\n");
-            break;
+            //break;
         } else {
             //printf("Sent: output networkDataAudio");
         }
@@ -273,6 +235,7 @@ int writeDataInSocket(WOLFSSL *ssl, LockFreeRingBuffer& recordBuffer) {
     delete dataForSend;
     return 0;
 }
+
 int readDataInSocket(WOLFSSL *ssl, LockFreeRingBuffer& readBuffer) {
     networkDataAudio* dataForReceive = new networkDataAudio;
     while(true) {
