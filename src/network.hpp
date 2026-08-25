@@ -22,7 +22,14 @@ void error_handling(const char *msg) {
     //exit(EXIT_FAILURE);
 }
 
+//ниже дефайны для cmd
+
+#define CONNECT 0//команда которая означает подключение к серверу
+
+
+
 typedef struct networkDataAudio {
+    char cmd;
     int sizeFrames;
     char username[8];
     char password[8];
@@ -31,6 +38,16 @@ typedef struct networkDataAudio {
     void setUsername(const char* nick) {
 
     }
+};
+
+typedef struct networkDataPacket {
+    char cmd;
+    char username[8];
+    char password[8];
+};
+
+class serverUserData {
+    
 };
 
 socket_t create_tcp_socket() {

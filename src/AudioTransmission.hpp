@@ -3,6 +3,7 @@
 #include "LockFreeRingBuffer.hpp"
 #include <thread>
 #include <chrono>
+#include <optional>
 
 /*
     #ifdef _WIN32
@@ -25,14 +26,20 @@ class AudioTransmission {
         LockFreeRingBuffer* recordBuffer;
 
         WOLFSSL_CTX* ctx;
-        WOLFSSL *ssl;
+        //std::optional<WOLFSSL*> ssl;
+        WOLFSSL* ssl;
 
         std::thread write;
         std::thread read;
+        std::thread controlthread;
+
+        std::atomic<bool> running;
+        std::atomic<bool> statusReadData, statusWriteData;
 
         int readData() {
             //networkDataAudio* dataForReceive = new networkDataAudio;
-            while(true) {
+            statusReadData = true;
+            while(running) {
                 int bytes = wolfSSL_read(ssl, receive.get(), sizeof(networkDataAudio));
                 if (bytes > 0) {
                     //buffer[bytes] = '\0';
@@ -43,13 +50,15 @@ class AudioTransmission {
                     break;
                 }
             }
+            statusReadData = false;
             //delete dataForReceive;
             return 0;
         }
 
         int writeData() {
+            statusWriteData = true;
             //networkDataAudio* dataForSend = new networkDataAudio;
-            while(true) {
+            while(running) {
                 send.get()->sizeFrames = recordBuffer->readBlocking(send.get()->frames, 882);
                 if (wolfSSL_write(ssl, send.get(), sizeof(networkDataAudio)) != (int)sizeof(networkDataAudio)) {
                     fprintf(stderr, "wolfSSL_write failed\n");
@@ -59,8 +68,36 @@ class AudioTransmission {
                 }
                 
             }
+            statusWriteData = false;
             //delete dataForSend;
             return 0;
+        }
+
+        void controlThread() {
+
+
+            ssl = wolfSSL_new(ctx);
+            if (!ssl) error_handling("wolfSSL_new failed");
+            wolfSSL_set_fd(ssl, sock);
+
+            wolfSSL_dtls_set_peer(ssl, (struct sockaddr*)&server_addr, sizeof(server_addr));
+            wolfSSL_dtls_set_mtu(ssl, 5000);
+
+
+            while(wolfSSL_connect(ssl) != SSL_SUCCESS) {
+                fprintf(stderr, "wolfSSL_connect failed\n");
+                std::this_thread::sleep_for(std::chrono::seconds(1));
+            }
+
+            printf("TLS handshake successful\n");
+            running = true;
+            write = std::thread(&AudioTransmission::writeData, this);
+            read = std::thread(&AudioTransmission::readData, this);
+            write.detach();
+            read.detach();
+
+            while(running) {std::this_thread::sleep_for(std::chrono::milliseconds(1));}
+            while(statusReadData || statusWriteData) {}
         }
 
     public:
@@ -97,27 +134,15 @@ class AudioTransmission {
         }
         //запускает передачу данных на udp сервер
         void startTransmission() {
-            ssl = wolfSSL_new(ctx);
-            if (!ssl) error_handling("wolfSSL_new failed");
-            wolfSSL_set_fd(ssl, sock);
-
-            wolfSSL_dtls_set_peer(ssl, (struct sockaddr*)&server_addr, sizeof(server_addr));
-            wolfSSL_dtls_set_mtu(ssl, 5000);
-
-            while(wolfSSL_connect(ssl) != SSL_SUCCESS) {
-                fprintf(stderr, "wolfSSL_connect failed\n");
-                std::this_thread::sleep_for(std::chrono::seconds(1));
-            }
-
-            printf("TLS handshake successful\n");
-            write = std::thread(&AudioTransmission::writeData, this);
-            read = std::thread(&AudioTransmission::readData, this);
-
-
+            controlthread = std::thread(&AudioTransmission::controlThread, this);
         }
 
         void stopTransmission() {
-            wolfSSL_free(ssl);
+            if (running) {
+                running = false;
+                while(statusReadData || statusWriteData) {}
+                wolfSSL_free(ssl);
+            }
         }
 
 

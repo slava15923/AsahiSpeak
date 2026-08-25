@@ -7,6 +7,7 @@
 #include "network.hpp"
 #include <thread>
 #include <vector>
+#include <iostream>
 
 #define PORT 15923
 #define BUFFER_SIZE 102400
@@ -21,134 +22,159 @@ void handle_sigint(int sig) {
     printf("\nShutting down server...\n");
 }
 
+int waitTimeaut(socket_t server_fd, int second, int microsecond) {
+    fd_set readfds;
+    FD_ZERO(&readfds);
+    FD_SET(server_fd, &readfds);
+
+    struct timeval timeout;
+    timeout.tv_sec = second; // Тайм-аут на чтение 3 секунды
+    timeout.tv_usec = microsecond;
+
+    int select_ret = select(server_fd + 1, &readfds, NULL, NULL, &timeout);
+    
+    return select_ret;
+}
+
 
 void mainUdpServer(const serverUdpData& cfg) {
 
     char buf[sizeof(networkDataAudio)];
     struct sockaddr_in client_addr;
     socklen_t client_len = sizeof(client_addr);
-
     while(true) {
-        int n = recvfrom(cfg.server_fd, buf, sizeof(buf), 0, (struct sockaddr*)&client_addr, &client_len);
+        while(true) {
 
-        if (n < 0) {
-            perror("recvfrom");
-            //close(cfg.server_fd);
-            //wolfSSL_CTX_free(cfg.ctx);
-            break;
-        }
-        printf("Получен первый пакет от %s:%d\n",
-        inet_ntoa(client_addr.sin_addr), ntohs(client_addr.sin_port));
+            int sel_ret = waitTimeaut(cfg.server_fd, 3, 0);
+            if (sel_ret == -1) {
+                perror("select");
+                break;
+            } else if (sel_ret == 0) {
+                fprintf(stderr, "Тайм-аут ожидания первого пакета\n");
+                break;  // или continue, если нужно ждать дальше
+            }
+            int n = recvfrom(cfg.server_fd, buf, sizeof(buf), 0, (struct sockaddr*)&client_addr, &client_len);
 
-        //handle_dtls_client(cfg.ctx, cfg.server_fd, &client_addr, client_len);
-        WOLFSSL* ssl = wolfSSL_new(cfg.ctx);
-
-        if (wolfSSL_dtls_set_timeout_init(ssl, 1) != SSL_SUCCESS) {
-            // Обработка ошибки
-        }
-        if (wolfSSL_dtls_set_timeout_max(ssl, 2) != SSL_SUCCESS) {
-            // Обработка ошибки
-        }
-
-        if (!ssl) {
-            fprintf(stderr, "Ошибка создания SSL-объекта\n");
-            //close(cfg.sock);
-            //wolfSSL_CTX_free(cfg.ctx);
-            break;
-        }
-
-        wolfSSL_set_fd(ssl, cfg.server_fd);
-
-        
-
-        if (wolfSSL_dtls_set_peer(ssl, &client_addr, sizeof(client_addr)) != SSL_SUCCESS) {
-            fprintf(stderr, "Ошибка wolfSSL_dtls_set_peer\n");
-            wolfSSL_free(ssl);
-            //close(sock);
-            //wolfSSL_CTX_free(ctx);
-            break;
-        }
-
-        wolfSSL_dtls_set_mtu(ssl, 5000);
-
-        if (wolfSSL_accept(ssl) != SSL_SUCCESS) {
-            fprintf(stderr, "Ошибка DTLS рукопожатия\n");
-            wolfSSL_free(ssl);
-            //close(sock);
-            //wolfSSL_CTX_free(ctx);
-            break;
-        }
-
-        printf("DTLS рукопожатие успешно завершено\n");
-
-        while (1) {
-            int ret = wolfSSL_read(ssl, buf, sizeof(buf));
-            if (ret <= 0) {
-                fprintf(stderr, "Ошибка чтения или соединение закрыто\n");
+            if (n < 0) {
+                perror("recvfrom");
+                //close(cfg.server_fd);
+                //wolfSSL_CTX_free(cfg.ctx);
                 break;
             }
-                //buffer[ret] = '\0';
-                //printf("Получено: %s\n", buffer);
+            printf("Получен первый пакет от %s:%d\n",
+            inet_ntoa(client_addr.sin_addr), ntohs(client_addr.sin_port));
 
-                /* Эхо-ответ */
-            wolfSSL_write(ssl, buf, ret);
+            //handle_dtls_client(cfg.ctx, cfg.server_fd, &client_addr, client_len);
+            WOLFSSL* ssl = wolfSSL_new(cfg.ctx);
+
+            //if (wolfSSL_dtls_set_timeout_init(ssl, 1) != SSL_SUCCESS) {
+                // Обработка ошибки
+            //}
+            //if (wolfSSL_dtls_set_timeout_max(ssl, 2) != SSL_SUCCESS) {
+                // Обработка ошибки
+            //}
+
+            
+
+            if (!ssl) {
+                fprintf(stderr, "Ошибка создания SSL-объекта\n");
+                //close(cfg.sock);
+                //wolfSSL_CTX_free(cfg.ctx);
+                break;
+            }
+
+            //int ret = wolfSSL_set_timeout(ssl, 3);
+
+            wolfSSL_dtls_set_using_nonblock(ssl, 1);
+
+            wolfSSL_set_fd(ssl, cfg.server_fd);
+
+            
+
+            //if (wolfSSL_dtls_set_peer(ssl, &client_addr, sizeof(client_addr)) != SSL_SUCCESS) {
+            //    fprintf(stderr, "Ошибка wolfSSL_dtls_set_peer\n");
+            //    wolfSSL_free(ssl);
+                //close(sock);
+                //wolfSSL_CTX_free(ctx);
+            //    break;
+            //}
+
+            wolfSSL_dtls_set_mtu(ssl, 5000);
+
+            while (1) {
+
+                int sel_ret = waitTimeaut(cfg.server_fd, 3, 0);
+                if (sel_ret == -1) {
+                    perror("select");
+                    break;
+                } else if (sel_ret == 0) {
+                    fprintf(stderr, "Тайм-аут рукопожатия\n");
+                    break;
+                }
+
+                int ret = wolfSSL_accept(ssl);
+                if (ret == SSL_SUCCESS) {
+                    printf("DTLS рукопожатие успешно завершено\n");
+                    // Получаем адрес клиента (опционально)
+                    struct sockaddr_in peer_addr;
+                    socklen_t peer_len = sizeof(peer_addr);
+                    if (wolfSSL_dtls_get_peer(ssl, (struct sockaddr*)&peer_addr, &peer_len) == SSL_SUCCESS) {
+                        printf("Клиент: %s:%d\n", inet_ntoa(peer_addr.sin_addr), ntohs(peer_addr.sin_port));
+                    }
+                    break; // выходим из цикла рукопожатия
+                } else {
+                    int err = wolfSSL_get_error(ssl, ret);
+                    if (err == SSL_ERROR_WANT_READ) {
+                        // Данных ещё нет – продолжаем ждать
+                        continue;
+                    } else {
+                        fprintf(stderr, "Ошибка DTLS рукопожатия: %d\n", err);
+                        wolfSSL_free(ssl);
+                        break;
+                    }
+                }
+            }
+
+            printf("DTLS рукопожатие успешно завершено\n");
+
+            while (1) {
+
+                int sel_ret = waitTimeaut(cfg.server_fd, 3, 0);
+
+                if (sel_ret == -1) {
+                    perror("select");
+                    break;
+                } else if (sel_ret == 0) {
+                    fprintf(stderr, "Тайм-аут ожидания данных\n");
+                    // Обработка тайм-аута: можно выйти из цикла или продолжить
+                    break;
+                }
+                int ret = wolfSSL_read(ssl, buf, sizeof(buf));
+                //std::cout << ret << std::endl;
+                if (ret <= 0) {
+                    fprintf(stderr, "Ошибка чтения или соединение закрыто\n");
+                    break;
+                } else {
+                    int err = wolfSSL_get_error(ssl, ret);
+                    if (err == SSL_ERROR_WANT_READ) {
+                        // Данных ещё нет – продолжаем ждать (повторный select)
+                        continue;
+                    } else {
+                        //fprintf(stderr, "Ошибка wolfSSL_read: %d\n", err); //оно всегда при подключении выдаёт ошибку 0, но всё работает, так что я хз что за ошибка
+                        //break;
+                    }
+                }
+                    //buffer[ret] = '\0';
+                    //printf("Получено: %s\n", buffer);
+
+                    /* Эхо-ответ */
+                wolfSSL_write(ssl, buf, ret);
+            }
+            wolfSSL_clear(ssl);
+            wolfSSL_free(ssl);
         }
     }
 
-
-    /* 4. Основной цикл приёма соединений */
-    /*sockaddr_in client_addr;
-    socklen_t client_len = sizeof(client_addr);
-    char buffer[sizeof(networkDataAudio)];
-    while (cfg.keep_running) {
-        int client_fd = accept(cfg.server_fd, (struct sockaddr*)&client_addr, &client_len);
-        if (client_fd < 0) {
-            if (!keep_running) break; // если выходим, то не ругаемся
-            perror("accept");
-            continue;
-        }
-
-        printf("New connection from %s:%d\n",
-               inet_ntoa(client_addr.sin_addr), ntohs(client_addr.sin_port));
-
-
-        WOLFSSL *ssl = wolfSSL_new(cfg.ctx);
-        if (!ssl) {
-            fprintf(stderr, "wolfSSL_new failed\n");
-            close(client_fd);
-            continue;
-        }
-        wolfSSL_set_fd(ssl, client_fd);
-
-        if (wolfSSL_accept(ssl) != SSL_SUCCESS) {
-            int err = wolfSSL_get_error(ssl, 0);
-            char err_buf[80];
-            wolfSSL_ERR_error_string(err, err_buf);
-            fprintf(stderr, "wolfSSL_accept error: %s\n", err_buf);
-            wolfSSL_free(ssl);
-            close(client_fd);
-            continue;
-        }
-
-
-        int bytes;
-        while ((bytes = wolfSSL_read(ssl, buffer, sizeof(buffer) - 1)) > 0) {
-            buffer[bytes] = '\0';
-            //printf("Received: %s", buffer); // сообщение может не заканчиваться на \n, но для наглядности
-            if (wolfSSL_write(ssl, buffer, bytes) != bytes) {
-                fprintf(stderr, "wolfSSL_write failed\n");
-                break;
-            }
-        }
-        if (bytes < 0) {
-            int err = wolfSSL_get_error(ssl, 0);
-            char err_buf[80];
-            wolfSSL_ERR_error_string(err, err_buf);
-            fprintf(stderr, "wolfSSL_read error: %s\n", err_buf);
-        } else if (bytes == 0) {
-            printf("Client closed connection\n");
-        }
-    }*/
 }
 
 int main() {
@@ -156,6 +182,7 @@ int main() {
         WSADATA wsaData;
         WSAStartup(MAKEWORD(2, 2), &wsaData);
     #endif
+    std::cout << SSL_ERROR_WANT_READ << std::endl;
     
     
 
@@ -196,6 +223,20 @@ int main() {
         perror("setsockopt");
         /* Не критично, продолжаем */
     }
+
+    #ifdef _WIN32
+        u_long mode = 1;
+        if (ioctlsocket(server_fd, FIONBIO, &mode) != 0) {
+            perror("ioctlsocket failed");
+            // обработка ошибки
+        }
+    #else
+        int flags = fcntl(server_fd, F_GETFL, 0);
+        if (flags == -1 || fcntl(server_fd, F_SETFL, flags | O_NONBLOCK) == -1) {
+            perror("fcntl failed");
+            // обработка ошибки
+        }
+    #endif
 
     server_addr.sin_family = AF_INET;
     server_addr.sin_addr.s_addr = INADDR_ANY;
