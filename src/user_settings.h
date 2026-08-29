@@ -15,6 +15,12 @@
 #define USE_FAST_MATH
 #define TFM_TIMING_RESISTANT
 
+#define WOLFSSL_DTLS
+#define WOLFSSL_DTLS_CID
+
+#define OPENSSL_EXTRA
+#define HAVE_WOLFSSL_BIO
+
 /* Для работы с системными сертификатами (если нужно) */
 // #define HAVE_SYS_CA_CERTS
 

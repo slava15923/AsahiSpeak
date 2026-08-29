@@ -19,7 +19,7 @@ class AudioTransmission {
         std::unique_ptr<networkDataAudio> receive;
         std::unique_ptr<networkDataAudio> send;
 
-        int sock;
+        socket_t sock;
         struct sockaddr_in server_addr;
 
         LockFreeRingBuffer* readBuffer;
@@ -75,13 +75,20 @@ class AudioTransmission {
 
         void controlThread() {
 
-
             ssl = wolfSSL_new(ctx);
             if (!ssl) error_handling("wolfSSL_new failed");
             wolfSSL_set_fd(ssl, sock);
 
             wolfSSL_dtls_set_peer(ssl, (struct sockaddr*)&server_addr, sizeof(server_addr));
-            wolfSSL_dtls_set_mtu(ssl, 5000);
+            wolfSSL_dtls_set_mtu(ssl, MTU);
+            
+            //if (wolfSSL_dtls_cid_use(ssl) != WOLFSSL_SUCCESS) {
+            //    fprintf(stderr, "wolfSSL_dtls_cid_use failed\n");
+            //}
+            // 4. Устанавливаем желаемый CID (предлагаем серверу)
+            //if (wolfSSL_dtls_cid_set(ssl, cid, CID_LEN) != WOLFSSL_SUCCESS) {
+            //    fprintf(stderr, "wolfSSL_dtls_cid_set failed\n");
+            //}
 
 
             while(wolfSSL_connect(ssl) != SSL_SUCCESS) {
@@ -90,6 +97,10 @@ class AudioTransmission {
             }
 
             printf("TLS handshake successful\n");
+
+            if (wolfSSL_dtls_cid_is_enabled(ssl) == 1) {
+                printf("CID успешно согласован!\n");
+            }
             running = true;
             write = std::thread(&AudioTransmission::writeData, this);
             read = std::thread(&AudioTransmission::readData, this);
@@ -108,8 +119,13 @@ class AudioTransmission {
             : recordBuffer(recordBuffer_), readBuffer(readBuffer_) {
 
             sock = create_udp_socket();
-            if (sock < 0) error_handling(" udp socket creation failed");
 
+            #ifdef _WIN32
+                if (sock == INVALID_SOCKET) error_handling(" udp socket creation failed");
+            #else
+                if (sock < 0) error_handling(" udp socket creation failed");
+            #endif
+            
             server_addr.sin_family = AF_INET;
             server_addr.sin_port = htons(port);
 
@@ -119,9 +135,11 @@ class AudioTransmission {
             receive = std::make_unique<networkDataAudio>();
             send = std::make_unique<networkDataAudio>();
 
-            ctx = wolfSSL_CTX_new(wolfDTLS_client_method());
+            ctx = wolfSSL_CTX_new(wolfDTLSv1_2_client_method());
             if (!ctx) error_handling("wolfSSL_CTX_new failed");
             wolfSSL_CTX_load_system_CA_certs(ctx);
+
+            
         }
 
         ~AudioTransmission() {

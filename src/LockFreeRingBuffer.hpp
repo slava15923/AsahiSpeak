@@ -14,6 +14,11 @@ public:
         read_idx.store(0, std::memory_order_relaxed);
         write_idx.store(0, std::memory_order_relaxed);
         count.store(0, std::memory_order_relaxed);
+
+        filter.setBandPass(300, 2000, 44100);
+        gain.setGain(1.5, 0); // увеличить громкость на 50% без плавности
+        gate.init(0.005f, 0.001f, 0.05f, 44100.0f);
+
     }
 
     ~LockFreeRingBuffer() = default;
@@ -53,10 +58,16 @@ public:
         } else {
             count.store(c + frames, std::memory_order_release);
         }
-        if(isNoiseGate) {
-            noisegate.processBlock(buffer.get(), frames);
-        }
+        //if(isNoiseGate) {
+        //    noisegate.processBlock(buffer.get(), frames);
+        //}
         // Уведомляем ожидающий поток, что появились новые данные
+
+        //filter.processBlock(buffer.get(), frames);   // обрезаем частоты
+        //gate.processBlock(buffer.get(), frames);
+        //gain.processBlock(buffer.get(), frames);     // усиливаем
+        
+
         cv.notify_one();
 
         return frames;
@@ -127,13 +138,12 @@ public:
     // releaseTime - время закрытия в секундах (обычно 0.05–0.2)
     // sampleRate - частота дискретизации
     void onNoiseGate(float threshold, float attackTime, float releaseTime, float sampleRate) {
-        noisegate.init(threshold, attackTime, releaseTime, sampleRate);
-        isNoiseGate = true;
+        //noisegate.init(threshold, attackTime, releaseTime, sampleRate);
+        //isNoiseGate = true;
     }
 
 
 private:
-    std::atomic<bool> isNoiseGate = false;
     const size_t capacity;
     std::unique_ptr<float[]> buffer;
     std::atomic<size_t> read_idx;
@@ -142,5 +152,8 @@ private:
 
     std::mutex cv_mutex;
     std::condition_variable cv;
-    NoiseGate noisegate;
+    BiquadFilter filter;
+    GainControl gain;
+    NoiseGate gate;
+
 };

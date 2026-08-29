@@ -70,3 +70,118 @@ float pcmBuffer[882];
 // Применяем шумовой затвор (все тихие участки обнулятся)
 gate.processBlock(pcmBuffer, 882);
 */
+
+
+#include <algorithm>
+#include <cmath>
+
+class GainControl {
+public:
+    // Установить целевой коэффициент усиления (например, 1.0 = без изменений, 0.5 = тише, 2.0 = громче)
+    void setGain(double targetGain, int rampSamples = 0) {
+        targetGain_ = targetGain;
+        rampSamples_ = rampSamples;
+        if (rampSamples <= 0) {
+            currentGain_ = targetGain;
+            step_ = 0.0;
+        } else {
+            step_ = (targetGain - currentGain_) / rampSamples;
+        }
+    }
+
+    // Обработка буфера (изменяет сэмплы на месте)
+    void processBlock(float* buffer, int numSamples) {
+        for (int i = 0; i < numSamples; ++i) {
+            // Если есть шаг плавного изменения
+            if (step_ != 0.0) {
+                currentGain_ += step_;
+                // Корректировка, чтобы не перескочить
+                if (std::abs(step_) > 0 && 
+                    ((step_ > 0 && currentGain_ >= targetGain_) || 
+                     (step_ < 0 && currentGain_ <= targetGain_))) {
+                    currentGain_ = targetGain_;
+                    step_ = 0.0;
+                }
+            }
+            // Применяем усиление и обрезаем пики (предотвращаем клиппинг)
+            float val = buffer[i] * currentGain_;
+            buffer[i] = std::clamp(val, -1.0f, 1.0f); // если ваш диапазон -1..1
+        }
+    }
+
+private:
+    double currentGain_ = 1.0;
+    double targetGain_ = 1.0;
+    double step_ = 0.0;
+    int rampSamples_ = 0;
+};
+
+
+#include <cmath>
+#include <vector>
+
+class BiquadFilter {
+public:
+    void setBandPass(double freqLow, double freqHigh, double sampleRate) {
+        double wLow  = 2.0 * M_PI * freqLow  / sampleRate;
+        double wHigh = 2.0 * M_PI * freqHigh / sampleRate;
+        double cosLow  = std::cos(wLow);
+        double cosHigh = std::cos(wHigh);
+        double alphaLow  = std::sin(wLow)  / (2.0 * 0.707); // Q=0.707 (Баттерворт)
+        double alphaHigh = std::sin(wHigh) / (2.0 * 0.707);
+
+        // Коэффициенты для ФНЧ (нижняя граница)
+        double b0_lp = (1.0 - cosLow) / 2.0;
+        double b1_lp = 1.0 - cosLow;
+        double b2_lp = (1.0 - cosLow) / 2.0;
+        double a0_lp = 1.0 + alphaLow;
+        double a1_lp = -2.0 * cosLow;
+        double a2_lp = 1.0 - alphaLow;
+
+        // Коэффициенты для ФВЧ (верхняя граница)
+        double b0_hp = (1.0 + cosHigh) / 2.0;
+        double b1_hp = -(1.0 + cosHigh);
+        double b2_hp = (1.0 + cosHigh) / 2.0;
+        double a0_hp = 1.0 + alphaHigh;
+        double a1_hp = -2.0 * cosHigh;
+        double a2_hp = 1.0 - alphaHigh;
+
+        // Объединяем в один полосовой фильтр (каскад ФНЧ+ФВЧ)
+        // Умножаем полиномы, получаем коэффициенты для одного биквадрата
+        // (или проще использовать два последовательных фильтра, что тоже быстро)
+        // Для простоты оставим каскад – два биквадрата подряд.
+        // Ниже инициализируем два фильтра.
+        lp_.setCoefficients(b0_lp/a0_lp, b1_lp/a0_lp, b2_lp/a0_lp, a1_lp/a0_lp, a2_lp/a0_lp);
+        hp_.setCoefficients(b0_hp/a0_hp, b1_hp/a0_hp, b2_hp/a0_hp, a1_hp/a0_hp, a2_hp/a0_hp);
+    }
+
+    double process(double input) {
+        // Сначала ФНЧ, затем ФВЧ (или наоборот – порядок не важен)
+        return hp_.process(lp_.process(input));
+    }
+
+    void processBlock(float* buffer, int numSamples) {
+        for (int i = 0; i < numSamples; ++i) {
+            buffer[i] = static_cast<float>(process(static_cast<double>(buffer[i])));
+        }
+    }
+
+private:
+    struct Biquad {
+        double b0=1, b1=0, b2=0, a1=0, a2=0;
+        double x1=0, x2=0, y1=0, y2=0;
+
+        void setCoefficients(double b0_, double b1_, double b2_, double a1_, double a2_) {
+            b0=b0_; b1=b1_; b2=b2_; a1=a1_; a2=a2_;
+        }
+
+        double process(double x) {
+            double y = b0*x + b1*x1 + b2*x2 - a1*y1 - a2*y2;
+            x2 = x1; x1 = x;
+            y2 = y1; y1 = y;
+            return y;
+        }
+    };
+
+    Biquad lp_, hp_;
+};

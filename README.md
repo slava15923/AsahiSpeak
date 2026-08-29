@@ -19,3 +19,7 @@ mkdir build && cd build && cmake .. && cmake --build . && ./AsahiSpeak
 для интерфейса используется FLTK
 openssl genpkey -algorithm RSA -out server-key.pem -pkeyopt rsa_keygen_bits:2048
 openssl req -new -x509 -key server-key.pem -out server-cert.pem -days 365 -subj "/CN=localhost"
+
+cmake -DWOLFSSL_EXAMPLES=no -DWOLFSSL_CRYPT_TESTS=no -DWOLFSSL_DTLS=ON -DWOLFSSL_DTLS13=ON -DWOLFSSL_DTLS_CID=ON .. && cmake --build . -j 16
+
+старт клиента: ./AsahiSpeak ip port

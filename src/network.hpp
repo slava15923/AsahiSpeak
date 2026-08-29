@@ -2,6 +2,9 @@
 
 #ifdef _WIN32
     typedef SOCKET socket_t;
+
+    #define _WIN32_WINNT 0x0600
+
 #else
     typedef int socket_t;
     #include <arpa/inet.h>
@@ -13,9 +16,18 @@
 
 #define WOLFSSL_DTLS
 
-#include <wolfssl/options.h> // Опции сборки wolfSSL
-#include <wolfssl/ssl.h>
-#include <wolfssl/wolfcrypt/error-crypt.h>
+#include <wolfssl/options.h>   // Рекомендуется подключать первым для согласованности настроек[reference:0][reference:1]
+#include <wolfssl/ssl.h>       // Основной заголовок для работы с SSL/TLS
+#include <wolfssl/wolfio.h>    // Важно! Содержит определения для пользовательских I/O колбэков[reference:2][reference:3]
+#include <wolfssl/wolfcrypt/settings.h> // Настройки криптографии, часто требуется неявно
+#include <wolfssl/wolfcrypt/error-crypt.h> // Для кодов ошибок, если используете wolfCrypt напрямую
+#include <wolfssl/openssl/bio.h>
+
+#define MTU 5000
+
+#define PORT 15923
+
+const int CID_LEN = 8;
 
 void error_handling(const char *msg) {
     fprintf(stderr, "Error: %s\n", msg);
@@ -33,6 +45,7 @@ typedef struct networkDataAudio {
     int sizeFrames;
     char username[8];
     char password[8];
+    uint channel;
     float frames[882];
 
     void setUsername(const char* nick) {
@@ -40,14 +53,8 @@ typedef struct networkDataAudio {
     }
 };
 
-typedef struct networkDataPacket {
-    char cmd;
-    char username[8];
-    char password[8];
-};
-
 class serverUserData {
-    
+
 };
 
 socket_t create_tcp_socket() {

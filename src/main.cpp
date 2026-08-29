@@ -20,9 +20,6 @@
 
 //0,02с ЭТО 882 ФРЕЙМОВ
 
-void Network(LockFreeRingBuffer* input, LockFreeRingBuffer* output, uint port, const char* ip);
-
-
 const int SAMPLE_RATE = 44100;
 
 const size_t RING_SIZE = SAMPLE_RATE * 0.2;
@@ -104,9 +101,20 @@ std::string helpText = "-help - help command";
 }
 
 int main(int argc, char* argv[]) {
+    char* ip;
+    uint16_t port;
+    char* username;
+    char* password;
+    std::cout << argc << std::endl;
+
+    if(argc < 3) {
+        throw std::runtime_error("не хватает аргументов");
+    }
+    ip = argv[1];
+    port = std::stoi(argv[2]);
     LockFreeRingBuffer recordBuffer(RING_SIZE);
     LockFreeRingBuffer readBuffer(RING_SIZE);
-    //recordBuffer.onNoiseGate(0.5, 0.001, 0.05, SAMPLE_RATE);
+    //recordBuffer.onNoiseGate(0.8, 0.001, 0.05, SAMPLE_RATE);
 
     std::cout << "hello world" << std::endl;
 
@@ -174,7 +182,7 @@ int main(int argc, char* argv[]) {
     
 
     wolfSSL_Init();
-    AudioTransmission udpClient("127.0.0.1", 15923, "admin", "admin", 0, &recordBuffer, &readBuffer);
+    AudioTransmission udpClient(ip, port, "admin", "admin", 0, &recordBuffer, &readBuffer);
 
     udpClient.addServerSert("server-cert.pem");
 
