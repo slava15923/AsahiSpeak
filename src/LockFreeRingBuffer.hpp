@@ -5,7 +5,6 @@
 #include <condition_variable>
 #include <chrono>
 #include <cstring>
-#include "audio.hpp"
 
 class LockFreeRingBuffer {
 public:
@@ -14,10 +13,6 @@ public:
         read_idx.store(0, std::memory_order_relaxed);
         write_idx.store(0, std::memory_order_relaxed);
         count.store(0, std::memory_order_relaxed);
-
-        filter.setBandPass(300, 2000, 44100);
-        gain.setGain(1.5, 0); // увеличить громкость на 50% без плавности
-        gate.init(0.005f, 0.001f, 0.05f, 44100.0f);
 
     }
 
@@ -152,8 +147,5 @@ private:
 
     std::mutex cv_mutex;
     std::condition_variable cv;
-    BiquadFilter filter;
-    GainControl gain;
-    NoiseGate gate;
 
 };

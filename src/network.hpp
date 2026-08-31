@@ -49,11 +49,7 @@ typedef struct networkDataAudio {
     char username[8];
     char password[8];
     uint channel;
-    float frames[882];
-
-    void setUsername(const char* nick) {
-
-    }
+    unsigned char frames[160];
 };
 
 class serverUserData {

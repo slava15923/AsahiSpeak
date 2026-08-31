@@ -4,6 +4,7 @@
 #include <thread>
 #include <chrono>
 #include <optional>
+#include <opus.h>
 
 /*
     #ifdef _WIN32
@@ -36,15 +37,21 @@ class AudioTransmission {
         std::atomic<bool> running;
         std::atomic<bool> statusReadData, statusWriteData;
 
+        OpusEncoder* encoder;
+        OpusDecoder* decoder;
+
+        int error = 0;
+
         int readData() {
-            //networkDataAudio* dataForReceive = new networkDataAudio;
+            std::unique_ptr<float[]> tempPCMData;
+            tempPCMData = std::make_unique<float[]>(FRAME_SIZE);
             statusReadData = true;
+
             while(running) {
                 int bytes = wolfSSL_read(ssl, receive.get(), sizeof(networkDataAudio));
                 if (bytes > 0) {
-                    //buffer[bytes] = '\0';
-                    //printf("Received: readBuffer");
-                    readBuffer->write(receive.get()->frames, receive.get()->sizeFrames);
+                    int decodedSamplesPerChannel = opus_decode_float(decoder, receive.get()->frames, 160, tempPCMData.get(), FRAME_SIZE, 0);
+                    readBuffer->write(tempPCMData.get(), decodedSamplesPerChannel);
                 } else {
                     fprintf(stderr, "wolfSSL_read error or connection closed\n");
                     break;
@@ -59,17 +66,25 @@ class AudioTransmission {
         int writeData() {
             statusWriteData = true;
             //networkDataAudio* dataForSend = new networkDataAudio;
+            std::unique_ptr<float[]> tempPCMData;
+            tempPCMData = std::make_unique<float[]>(FRAME_SIZE);
+            int n;
+
             while(running) {
-                send.get()->sizeFrames = recordBuffer->readBlocking(send.get()->frames, FRAME_SIZE);
-                //std::cout << send.get()->frames[0] << std::endl;
-                if (wolfSSL_write(ssl, send.get(), sizeof(networkDataAudio)) != (int)sizeof(networkDataAudio)) {
-                    fprintf(stderr, "wolfSSL_write failed\n");
-                    //break;
-                } else {
-                    //printf("Sent: output networkDataAudio");
+                n = recordBuffer->readBlocking(tempPCMData.get(), FRAME_SIZE);
+
+                if (n == FRAME_SIZE) {
+                    opus_encode_float(encoder,tempPCMData.get(),FRAME_SIZE, send.get()->frames, 160);
+                    //std::cout << send.get()->frames[0] << std::endl;
+                    if (wolfSSL_write(ssl, send.get(), sizeof(networkDataAudio)) != (int)sizeof(networkDataAudio)) {
+                        fprintf(stderr, "wolfSSL_write failed\n");
+                        //break;
+                    } else {
+                        //printf("Sent: output networkDataAudio");
+                    }
+                    //std::cout << "writeData" << std::endl;
                 }
-                //std::cout << "writeData" << std::endl;
-                
+                    
             }
             statusWriteData = false;
             //delete dataForSend;
@@ -141,6 +156,22 @@ class AudioTransmission {
             ctx = wolfSSL_CTX_new(wolfDTLSv1_2_client_method());
             if (!ctx) error_handling("wolfSSL_CTX_new failed");
             wolfSSL_CTX_load_system_CA_certs(ctx);
+
+            encoder = opus_encoder_create(SAMPLE_RATE, 1, OPUS_APPLICATION_AUDIO, &error);
+            if (error != OPUS_OK) {
+                std::cerr << "Ошибка создания энкодера: " << opus_strerror(error) << std::endl;
+            }
+
+            opus_encoder_ctl(encoder, OPUS_SET_BITRATE(64000));
+
+            opus_encoder_ctl(encoder, OPUS_SET_VBR(0));
+
+            opus_encoder_ctl(encoder, OPUS_SET_COMPLEXITY(0));
+
+            decoder = opus_decoder_create(SAMPLE_RATE, 1, &error);
+            if (error != OPUS_OK) {
+                std::cerr << "Ошибка создания декодера: " << opus_strerror(error) << std::endl;
+            }
 
             
         }

@@ -28,7 +28,7 @@ add_executable(AsahiSpeak src/main.cpp)
 
 target_compile_features(AsahiSpeak PRIVATE cxx_std_17)
 
-target_link_libraries(AsahiSpeak PRIVATE cubeb wolfssl)
+target_link_libraries(AsahiSpeak PRIVATE cubeb wolfssl opus)
 
 
 target_include_directories(AsahiSpeak PUBLIC 
