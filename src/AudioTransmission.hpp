@@ -23,8 +23,8 @@ class AudioTransmission {
         socket_t sock;
         struct sockaddr_in server_addr;
 
-        LockFreeRingBuffer* readBuffer;
-        LockFreeRingBuffer* recordBuffer;
+        LockFreeRingBuffer& readBuffer;
+        LockFreeRingBuffer& recordBuffer;
 
         WOLFSSL_CTX* ctx;
         //std::optional<WOLFSSL*> ssl;
@@ -51,7 +51,7 @@ class AudioTransmission {
                 int bytes = wolfSSL_read(ssl, receive.get(), sizeof(networkDataAudio));
                 if (bytes > 0) {
                     int decodedSamplesPerChannel = opus_decode_float(decoder, receive.get()->frames, 160, tempPCMData.get(), FRAME_SIZE, 0);
-                    readBuffer->write(tempPCMData.get(), decodedSamplesPerChannel);
+                    readBuffer.write(tempPCMData.get(), decodedSamplesPerChannel);
                 } else {
                     fprintf(stderr, "wolfSSL_read error or connection closed\n");
                     break;
@@ -71,7 +71,7 @@ class AudioTransmission {
             int n;
 
             while(running) {
-                n = recordBuffer->readBlocking(tempPCMData.get(), FRAME_SIZE);
+                n = recordBuffer.readBlocking(tempPCMData.get(), FRAME_SIZE);
 
                 if (n == FRAME_SIZE) {
                     opus_encode_float(encoder,tempPCMData.get(),FRAME_SIZE, send.get()->frames, 160);
@@ -132,8 +132,8 @@ class AudioTransmission {
     public:
         AudioTransmission(const char* ip, uint16_t port, 
             const char* username, const char* password, 
-            int numchannel, LockFreeRingBuffer* recordBuffer_, 
-            LockFreeRingBuffer* readBuffer_) 
+            int numchannel, LockFreeRingBuffer& recordBuffer_, 
+            LockFreeRingBuffer& readBuffer_) 
             : recordBuffer(recordBuffer_), readBuffer(readBuffer_) {
 
             sock = create_udp_socket();
@@ -201,8 +201,8 @@ class AudioTransmission {
 
         void addServerSert(const char *file) {
             if (wolfSSL_CTX_load_verify_locations(ctx, file, 0) != SSL_SUCCESS) {
-                fprintf(stderr, "Warning: CA certificates not loaded, trying without verification\n");
-                wolfSSL_CTX_set_verify(ctx, SSL_VERIFY_NONE, 0);
+                //wolfSSL_CTX_set_verify(ctx, SSL_VERIFY_NONE, 0);
+                throw std::runtime_error("CA certificates not loaded, trying without verification");
             }
         }
 };

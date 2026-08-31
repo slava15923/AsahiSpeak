@@ -13,6 +13,7 @@
 #include "LockFreeRingBuffer.hpp"
 #include "network.hpp"
 #include "AudioTransmission.hpp"
+#include <audioIO.hpp>
 
 #ifdef _WIN32
     #include <combaseapi.h>
@@ -120,10 +121,6 @@ int main(int argc, char* argv[]) {
     }
     ip = argv[1];
     port = std::stoi(argv[2]);
-    LockFreeRingBuffer recordBuffer(RING_SIZE);
-    LockFreeRingBuffer noiseCancellation(RING_SIZE);
-    LockFreeRingBuffer readBuffer(RING_SIZE);
-    //recordBuffer.onNoiseGate(0.8, 0.001, 0.05, SAMPLE_RATE);
 
     std::cout << "hello world" << std::endl;
 
@@ -131,55 +128,26 @@ int main(int argc, char* argv[]) {
     uint32_t latency_frames;
 
     cubeb * app_ctx;
-    //cubeb_stream * stm = nullptr;
-
-    cubeb_stream * stm_micro = nullptr;
-    cubeb_stream * stm_dinamic = nullptr;
-
-    //std::cout << cubeb_set_log_callback(CUBEB_LOG_VERBOSE, cubebCallback) << std::endl;
-
     
     std::cout << cubeb_init(&app_ctx, "Example Application", nullptr) << std::endl;
 
     std::cout << cubeb_get_preferred_sample_rate(app_ctx, &rate) << std::endl;
 
-    
+    cubeb_stream_params params;
+    params.format = CUBEB_SAMPLE_FLOAT32NE; // или CUBEB_SAMPLE_S16LE
+    params.rate = SAMPLE_RATE;                   // ваша частота дискретизации
+    params.channels = 1;                   // количество каналов
+    params.layout = CUBEB_LAYOUT_UNDEFINED;
+    params.prefs = CUBEB_STREAM_PREF_NONE;
+    std::cout << cubeb_get_min_latency(app_ctx, &params, &latency_frames) << std::endl;
 
-    // Параметры ВЫХОДА
-    cubeb_stream_params output_params;
-    output_params.format = CUBEB_SAMPLE_FLOAT32NE; 
-    output_params.rate = SAMPLE_RATE;                    
-    output_params.channels = 1;                  
-    output_params.layout = CUBEB_LAYOUT_UNDEFINED;
-    output_params.prefs = CUBEB_STREAM_PREF_NONE; 
+    audioInput micro(app_ctx, SAMPLE_RATE, latency_frames);
+    micro.startRecord();
 
-    // Параметры ВХОДА
-    cubeb_stream_params input_params;
-    input_params.format = CUBEB_SAMPLE_FLOAT32NE;
-    input_params.rate = SAMPLE_RATE;
-    input_params.channels = 1;                  
-    input_params.layout = CUBEB_LAYOUT_UNDEFINED;
-    input_params.prefs = CUBEB_STREAM_PREF_NONE;
-
-    std::cout << cubeb_get_min_latency(app_ctx, &output_params, &latency_frames) << std::endl;
+    audioOut dinamic(app_ctx, SAMPLE_RATE, latency_frames);
+    dinamic.startRead();
 
     std::cout << latency_frames << std::endl;
-
-    //cubeb_stream_init(app_ctx, &stm, "Test", NULL, &input_params, NULL, &output_params, latency_frames, data_fullduplex, state_cb, NULL);
-
-    //cubeb_stream_start(stm);
-
-    cubeb_stream_init(app_ctx, &stm_dinamic, "Test", NULL, 
-        NULL, NULL, &output_params, latency_frames, 
-        data_dinamic, state_cb, &readBuffer);
-
-    cubeb_stream_init(app_ctx, &stm_micro, "Test", NULL, 
-        &input_params, NULL, NULL, latency_frames, 
-        data_micro, state_cb, &recordBuffer);
-
-    cubeb_stream_start(stm_micro);
-    cubeb_stream_start(stm_dinamic);
-
 
     #ifdef _WIN32
         WSADATA wsaData;
@@ -191,7 +159,7 @@ int main(int argc, char* argv[]) {
     
 
     wolfSSL_Init();
-    AudioTransmission udpClient(ip, port, "admin", "admin", 0, &recordBuffer, &readBuffer);
+    AudioTransmission udpClient(ip, port, "admin", "admin", 0, micro.getBuffer(), dinamic.getBuffer());
 
     udpClient.addServerSert("server-cert.pem");
 
@@ -207,21 +175,7 @@ int main(int argc, char* argv[]) {
 
     wolfSSL_Cleanup();
 
-
-
-
-
-    //while (true) { std::this_thread::sleep_for(std::chrono::seconds(100));}
-
     getchar();
-
-    //cubeb_stream_stop(stm);
-    cubeb_stream_stop(stm_dinamic);
-    cubeb_stream_stop(stm_micro);
-
-    //cubeb_stream_destroy(stm);
-    cubeb_stream_destroy(stm_micro);
-    cubeb_stream_destroy(stm_dinamic);
 
     cubeb_destroy(app_ctx);
 

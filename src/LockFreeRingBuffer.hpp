@@ -53,14 +53,6 @@ public:
         } else {
             count.store(c + frames, std::memory_order_release);
         }
-        //if(isNoiseGate) {
-        //    noisegate.processBlock(buffer.get(), frames);
-        //}
-        // Уведомляем ожидающий поток, что появились новые данные
-
-        //filter.processBlock(buffer.get(), frames);   // обрезаем частоты
-        //gate.processBlock(buffer.get(), frames);
-        //gain.processBlock(buffer.get(), frames);     // усиливаем
         
 
         cv.notify_one();
@@ -132,10 +124,6 @@ public:
     // attackTime - время открытия в секундах (обычно 0.001–0.01)
     // releaseTime - время закрытия в секундах (обычно 0.05–0.2)
     // sampleRate - частота дискретизации
-    void onNoiseGate(float threshold, float attackTime, float releaseTime, float sampleRate) {
-        //noisegate.init(threshold, attackTime, releaseTime, sampleRate);
-        //isNoiseGate = true;
-    }
 
 
 private:

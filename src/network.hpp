@@ -32,6 +32,8 @@ const int SAMPLE_RATE = 48000;
 const size_t RING_SIZE = SAMPLE_RATE * 0.2;
 const int BIT_RATE = 64000;
 
+const int SERVER_TIME_OUT = 5;//в секундах
+
 void error_handling(const char *msg) {
     fprintf(stderr, "Error: %s\n", msg);
     //exit(EXIT_FAILURE);

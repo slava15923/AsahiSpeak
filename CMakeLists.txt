@@ -26,7 +26,7 @@ add_executable(AsahiSpeak src/main.cpp)
 
 
 
-target_compile_features(AsahiSpeak PRIVATE cxx_std_17)
+target_compile_features(AsahiSpeak PRIVATE cxx_std_20)
 
 target_link_libraries(AsahiSpeak PRIVATE cubeb wolfssl opus)
 
@@ -41,6 +41,8 @@ target_include_directories(AsahiSpeak PUBLIC
 )
 
 if(!WIN32)
+    target_compile_features(AsahiSpeakServer PRIVATE cxx_std_20)
+
     add_executable(AsahiSpeakServer src/server.cpp)
 
     target_link_libraries(AsahiSpeakServer PRIVATE wolfssl)
