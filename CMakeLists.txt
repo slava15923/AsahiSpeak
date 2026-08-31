@@ -15,6 +15,7 @@ set(WOLFSSL_DTLS_CID ON CACHE BOOL "" FORCE)
 
 add_subdirectory(cubeb)
 add_subdirectory(wolfssl-5.9.2-stable)
+add_subdirectory(opus-1.5.2)
 
 
 add_compile_options(-O3)
@@ -38,6 +39,7 @@ target_include_directories(AsahiSpeak PUBLIC
     ${PROJECT_SOURCE_DIR}/libhv/include/hv
     ${PROJECT_SOURCE_DIR}/wolfssl-5.9.2-stable/wolfssl
     ${PROJECT_SOURCE_DIR}/src
+    ${PROJECT_SOURCE_DIR}/opus-1.5.2/include
 )
 
 if(!WIN32)

@@ -5,7 +5,6 @@
 #include <atomic>
 
 #include <SFML/Audio.hpp>
-#include <baudvine/ringbuf.h>
 #include <cubeb/cubeb.h>
 #include <string.h>
 
@@ -20,9 +19,7 @@
 
 //0,02с ЭТО 882 ФРЕЙМОВ
 
-const int SAMPLE_RATE = 44100;
 
-const size_t RING_SIZE = SAMPLE_RATE * 0.2;
 
 
 
@@ -46,6 +43,7 @@ extern "C" long data_fullduplex(cubeb_stream * stm, void * user,
             out[i * 2 + c] = in[i];
         }
     }
+    
     return nframes;
 }
 
@@ -59,6 +57,7 @@ extern "C" long data_micro(cubeb_stream * stm, void * user,
 
     const float* in = static_cast<const float*>(input_buffer);
     recordBuffer->write(in, nframes);
+    //std::cout << "writeDataMicro" << nframes << std::endl;
     return nframes; // Возвращаем количество обработанных кадров
 }
 
@@ -78,6 +77,7 @@ extern "C" long data_dinamic(cubeb_stream * stm, void * user,
         // Заполняет нулями
         memset(out + read * channels, 0, (nframes - read) * channels * sizeof(float));
     }
+    //std::cout << "writeDataDinamic" << nframes << std::endl;
     return nframes;
 }
 
@@ -113,6 +113,7 @@ int main(int argc, char* argv[]) {
     ip = argv[1];
     port = std::stoi(argv[2]);
     LockFreeRingBuffer recordBuffer(RING_SIZE);
+    LockFreeRingBuffer noiseCancellation(RING_SIZE);
     LockFreeRingBuffer readBuffer(RING_SIZE);
     //recordBuffer.onNoiseGate(0.8, 0.001, 0.05, SAMPLE_RATE);
 

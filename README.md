@@ -12,6 +12,8 @@ i'm created tg channel for news to development AsahiSpeak: https://t.me/AsahiSpe
 #sfml
 sudo apt install libpulse-dev libasound2-dev
 
+git clone --recurse-submodules -b unstable https://github.com/slava15923/AsahiSpeak.git
+
 mkdir build && cd build && cmake .. && cmake --build . && ./AsahiSpeak
 
 поддерживает только моно микрофоны
@@ -20,6 +22,6 @@ mkdir build && cd build && cmake .. && cmake --build . && ./AsahiSpeak
 openssl genpkey -algorithm RSA -out server-key.pem -pkeyopt rsa_keygen_bits:2048
 openssl req -new -x509 -key server-key.pem -out server-cert.pem -days 365 -subj "/CN=localhost"
 
-cmake -DWOLFSSL_EXAMPLES=no -DWOLFSSL_CRYPT_TESTS=no -DWOLFSSL_DTLS=ON -DWOLFSSL_DTLS13=ON -DWOLFSSL_DTLS_CID=ON .. && cmake --build . -j 16
+cmake -DWOLFSSL_EXAMPLES=no -DWOLFSSL_CRYPT_TESTS=no -DWOLFSSL_DTLS=ON -DWOLFSSL_DTLS13=ON -DWOLFSSL_DTLS_CID=ON -DWOLFSSL_USER_IO=on-DDEBUG_WOLFSSL=ON -DWOLFSSL_OPENSSLEXTRA=YES -DBUILD_TESTING=OFF -DWOLFSSL_BUILD_TESTS=OFF .. && cmake --build . -j 16
 
 старт клиента: ./AsahiSpeak ip port

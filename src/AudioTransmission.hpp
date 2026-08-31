@@ -49,6 +49,7 @@ class AudioTransmission {
                     fprintf(stderr, "wolfSSL_read error or connection closed\n");
                     break;
                 }
+                //std::cout << "readData" << std::endl;
             }
             statusReadData = false;
             //delete dataForReceive;
@@ -59,13 +60,15 @@ class AudioTransmission {
             statusWriteData = true;
             //networkDataAudio* dataForSend = new networkDataAudio;
             while(running) {
-                send.get()->sizeFrames = recordBuffer->readBlocking(send.get()->frames, 882);
+                send.get()->sizeFrames = recordBuffer->readBlocking(send.get()->frames, FRAME_SIZE);
+                //std::cout << send.get()->frames[0] << std::endl;
                 if (wolfSSL_write(ssl, send.get(), sizeof(networkDataAudio)) != (int)sizeof(networkDataAudio)) {
                     fprintf(stderr, "wolfSSL_write failed\n");
                     //break;
                 } else {
                     //printf("Sent: output networkDataAudio");
                 }
+                //std::cout << "writeData" << std::endl;
                 
             }
             statusWriteData = false;
