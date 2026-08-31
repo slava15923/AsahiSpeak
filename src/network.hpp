@@ -1,7 +1,7 @@
 #pragma once
 
 #ifdef _WIN32
-    typedef SOCKET socket_t;
+    #define socket_t SOCKET
 
     #define _WIN32_WINNT 0x0600
 
@@ -23,7 +23,7 @@
 #include <wolfssl/wolfcrypt/error-crypt.h> // Для кодов ошибок, если используете wolfCrypt напрямую
 #include <wolfssl/openssl/bio.h>
 
-#define MTU 5000
+#define MTU 1200
 
 #define PORT 15923
 

@@ -14,6 +14,11 @@
 #include "network.hpp"
 #include "AudioTransmission.hpp"
 
+#ifdef _WIN32
+    #include <combaseapi.h>
+
+#endif
+
 
 
 
@@ -101,6 +106,9 @@ std::string helpText = "-help - help command";
 }
 
 int main(int argc, char* argv[]) {
+    #ifdef _WIN32
+        HRESULT hr = CoInitializeEx(NULL, COINIT_MULTITHREADED);
+    #endif
     char* ip;
     uint16_t port;
     char* username;

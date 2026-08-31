@@ -49,6 +49,9 @@ public:
         wolfSSL_dtls_set_mtu(ssl, MTU);
         wolfSSL_set_using_nonblock(ssl, 1);
 
+        wolfSSL_dtls_set_timeout_init(ssl, 3000);
+        wolfSSL_dtls_set_timeout_max(ssl, 15000);
+
         wolfSSL_SetIOWriteCtx(ssl, this);
         wolfSSL_SetIOReadCtx(ssl, nullptr);
         buf = new char[sizeBuf]; 

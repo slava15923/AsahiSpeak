@@ -32,11 +32,9 @@ target_link_libraries(AsahiSpeak PRIVATE cubeb wolfssl opus)
 
 
 target_include_directories(AsahiSpeak PUBLIC 
-    ${PROJECT_SOURCE_DIR}/ringbuf/include
     ${PROJECT_SOURCE_DIR}/cubeb/include
     ${PROJECT_SOURCE_DIR}/cubeb/src
     ${PROJECT_SOURCE_DIR}/build/exports
-    ${PROJECT_SOURCE_DIR}/libhv/include/hv
     ${PROJECT_SOURCE_DIR}/wolfssl-5.9.2-stable/wolfssl
     ${PROJECT_SOURCE_DIR}/src
     ${PROJECT_SOURCE_DIR}/opus-1.5.2/include
@@ -48,11 +46,6 @@ if(!WIN32)
     target_link_libraries(AsahiSpeakServer PRIVATE wolfssl)
 
     target_include_directories(AsahiSpeakServer PUBLIC 
-        ${PROJECT_SOURCE_DIR}/ringbuf/include
-        ${PROJECT_SOURCE_DIR}/cubeb/include
-        ${PROJECT_SOURCE_DIR}/cubeb/src
-        ${PROJECT_SOURCE_DIR}/build/exports
-        ${PROJECT_SOURCE_DIR}/libhv/include/hv
         ${PROJECT_SOURCE_DIR}/wolfssl-5.9.2-stable/wolfssl
         ${PROJECT_SOURCE_DIR}/src
     )
