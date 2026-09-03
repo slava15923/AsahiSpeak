@@ -13,6 +13,9 @@
     #include <queue>
     #include <atomic>
     #include <algorithm>
+    #include <mutex>
+    #include <memory.h>
+    #include <optional>
 
 
 
@@ -39,8 +42,10 @@
         char* buf;
         int sizeBuf = 5000;
         char errstr[256];
-        std::string username;
+
         std::queue<networkDataAudio> dataForSend;
+        std::mutex mutex;
+        std::optional<std::string> username;
 
         SessionData(const uint64_t& clientHash_, socket_t server_fd_,
                     WOLFSSL_CTX* ctx, const struct sockaddr_in addr_)
@@ -63,6 +68,7 @@
         }
 
         ~SessionData() {
+            std::lock_guard<std::mutex> lock(mutex);
             if (ssl) wolfSSL_free(ssl);
         }
 
@@ -71,8 +77,9 @@
         }
 
         // Основной метод обработки входящего пакета
-        bool processIncoming(const char* data, int sz) {
-            if (wolfSSL_inject(ssl, data, sz) != WOLFSSL_SUCCESS) {
+        bool processIncoming(const char* data_, int sz) {
+            std::lock_guard<std::mutex> lock(mutex);
+            if (wolfSSL_inject(ssl, data_, sz) != WOLFSSL_SUCCESS) {
                 return false;
             }
             updateLastUsed();
@@ -95,24 +102,29 @@
             }
 
             
-            while (true) {
-                int ret = wolfSSL_read(ssl, buf, sizeBuf);
-                if (ret > 0) {
-                    networkDataAudio* audio = reinterpret_cast<networkDataAudio*>(buf);
-                    username = audio->username;
+
+            int ret = wolfSSL_read(ssl, buf, sizeBuf);
+            if (ret > 0) {
+                if(ret == sizeof(networkDataAudio)){
+                    networkDataAudio* data = reinterpret_cast<networkDataAudio*>(buf);
+                    if(username.has_value()) *username = data->username;
+                    memset(data->password, 0, sizeof(networkDataAudio::password));
+                    //username = audio->username;
                     wolfSSL_write(ssl, buf, ret);
                     updateLastUsed();
-                } else if (ret == 0) {
-                    return false;
+                }
+            } else if (ret == 0) {
+                return false;
+            } else {
+                int err = wolfSSL_get_error(ssl, ret);
+                if (err == WOLFSSL_ERROR_WANT_READ || err == WOLFSSL_ERROR_WANT_WRITE) {
+                    return true;
+                    
                 } else {
-                    int err = wolfSSL_get_error(ssl, ret);
-                    if (err == WOLFSSL_ERROR_WANT_READ || err == WOLFSSL_ERROR_WANT_WRITE) {
-                        break;
-                    } else {
-                        return false;
-                    }
+                    return false;
                 }
             }
+
             return true;
         }
 
@@ -128,8 +140,8 @@
             auto seconds_passed = std::chrono::duration_cast<std::chrono::seconds>(now - last_used).count();
             return seconds_passed;
         }
-        std::string& getUserName() {
-            return username;
+        std::string getUserName() {
+            return *username;
         }
     };
 
@@ -194,7 +206,9 @@
 
 
                 if(sessions.count(clientHash)) {
-                    sessions[clientHash].get()->processIncoming(buf, n);
+                    try{
+                        sessions.at(clientHash).get()->processIncoming(buf, n);
+                    } catch(const std::out_of_range& e) {}
                     //std::cout << clientHash << "a" << std::endl;
                 } else {
                     sessions.insert({clientHash, std::make_unique<SessionData>(clientHash, cfg.server_fd, cfg.ctx, client_addr)});

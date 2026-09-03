@@ -1,18 +1,17 @@
 #pragma once
-#include <atomic>
-#include <memory>
 #include <mutex>
 #include <condition_variable>
 #include <chrono>
 #include <cstring>
+#include <memory>
 
 class LockFreeRingBuffer {
 public:
     LockFreeRingBuffer(size_t capacity_frames)
         : capacity(capacity_frames), buffer(new float[capacity_frames]) {
-        read_idx.store(0, std::memory_order_relaxed);
-        write_idx.store(0, std::memory_order_relaxed);
-        count.store(0, std::memory_order_relaxed);
+        read_idx = 0;
+        write_idx = 0;
+        count = 0;
     }
 
     ~LockFreeRingBuffer() = default;
@@ -22,18 +21,8 @@ public:
     size_t write(const float* src, size_t frames) {
         if (frames == 0) return 0;
 
-        // Загружаем текущие индексы и счётчик
-        size_t w = write_idx.load(std::memory_order_relaxed);  // только пишущий поток
-        size_t r = read_idx.load(std::memory_order_acquire);   // видеть свежий read_idx
-        size_t c = count.load(std::memory_order_acquire);      // видеть свежий count
-
-        size_t free_space = capacity - c;
-        size_t overwrite = 0;
-        if (frames > free_space) {
-            overwrite = frames - free_space;
-        }
-
-        // Копируем данные в буфер (две части, если переход через границу)
+        // Сначала копируем данные (без блокировки) – используем текущий write_idx
+        size_t w = write_idx; // писатель один, можно читать без синхронизации
         size_t first_part = capacity - w;
         size_t copy1 = (frames < first_part) ? frames : first_part;
         memcpy(buffer.get() + w, src, copy1 * sizeof(float));
@@ -41,20 +30,21 @@ public:
             memcpy(buffer.get(), src + copy1, (frames - copy1) * sizeof(float));
         }
 
-        // Обновляем write_idx (читатель его не использует, но для порядка с буфером можно release)
+        // Обновляем индексы под мьютексом
+        std::lock_guard<std::mutex> lock(mutex);
         size_t new_w = (w + frames) % capacity;
-        write_idx.store(new_w, std::memory_order_release);
+        write_idx = new_w;
 
-        // Критическое обновление состояния: read_idx и count должны быть видны согласованно.
+        size_t free_space = capacity - count;
+        size_t overwrite = 0;
+        if (frames > free_space) {
+            overwrite = frames - free_space;
+        }
         if (overwrite > 0) {
-            size_t new_r = (r + overwrite) % capacity;
-            // Используем seq_cst, чтобы гарантировать порядок записи обеих переменных
-            read_idx.store(new_r, std::memory_order_seq_cst);
-            count.store(capacity, std::memory_order_seq_cst);
+            read_idx = (read_idx + overwrite) % capacity;
+            count = capacity;
         } else {
-            // Меняется только count, read_idx не меняется – достаточно release,
-            // но для единообразия используем seq_cst (небольшие накладные расходы)
-            count.store(c + frames, std::memory_order_seq_cst);
+            count += frames;
         }
 
         cv.notify_one();
@@ -65,25 +55,23 @@ public:
     size_t read(float* dst, size_t frames) {
         if (frames == 0) return 0;
 
-        // Загружаем read_idx и count с acquire, чтобы видеть последние изменения
-        size_t r = read_idx.load(std::memory_order_acquire);
-        size_t c = count.load(std::memory_order_acquire);
-        size_t available = c;
-        size_t to_read = (frames < available) ? frames : available;
-        if (to_read == 0) return 0;
+        size_t r, to_read;
+        {
+            std::lock_guard<std::mutex> lock(mutex);
+            if (count == 0) return 0;
+            to_read = (frames < count) ? frames : count;
+            r = read_idx;
+            read_idx = (r + to_read) % capacity;
+            count -= to_read;
+        }
 
-        // Копируем данные
+        // Копируем данные вне мьютекса
         size_t first_part = capacity - r;
         size_t copy = (to_read < first_part) ? to_read : first_part;
         memcpy(dst, buffer.get() + r, copy * sizeof(float));
         if (to_read > copy) {
             memcpy(dst + copy, buffer.get(), (to_read - copy) * sizeof(float));
         }
-
-        // Обновляем read_idx и count согласованно (seq_cst)
-        size_t new_r = (r + to_read) % capacity;
-        read_idx.store(new_r, std::memory_order_seq_cst);
-        count.store(c - to_read, std::memory_order_seq_cst);
 
         return to_read;
     }
@@ -95,39 +83,50 @@ public:
     size_t readBlocking(float* dst, size_t frames, std::chrono::milliseconds timeout = std::chrono::milliseconds::max()) {
         if (frames == 0) return 0;
 
-        std::unique_lock<std::mutex> lock(cv_mutex);
+        std::unique_lock<std::mutex> lock(mutex);
         bool ready = false;
         if (timeout == std::chrono::milliseconds::max()) {
-            cv.wait(lock, [this, frames] {
-                return count.load(std::memory_order_acquire) >= frames;
-            });
+            cv.wait(lock, [this, frames] { return count >= frames; });
             ready = true;
         } else {
-            ready = cv.wait_for(lock, timeout, [this, frames] {
-                return count.load(std::memory_order_acquire) >= frames;
-            });
+            ready = cv.wait_for(lock, timeout, [this, frames] { return count >= frames; });
         }
 
         if (!ready) {
             return 0;
         }
 
-        // После пробуждения вызываем обычное read – оно уже корректно обработает согласованность
-        return read(dst, frames);
+        // После пробуждения у нас уже захвачен мьютекс
+        size_t r = read_idx;
+        size_t to_read = (frames < count) ? frames : count; // может быть меньше из-за перезаписи
+        read_idx = (r + to_read) % capacity;
+        count -= to_read;
+        lock.unlock();
+
+        // Копируем данные
+        size_t first_part = capacity - r;
+        size_t copy = (to_read < first_part) ? to_read : first_part;
+        memcpy(dst, buffer.get() + r, copy * sizeof(float));
+        if (to_read > copy) {
+            memcpy(dst + copy, buffer.get(), (to_read - copy) * sizeof(float));
+        }
+
+        return to_read;
     }
 
-    // Получить текущее количество доступных фреймов (без блокировки)
+    // Получить текущее количество доступных фреймов (без блокировки – но с мьютексом)
     size_t available() const {
-        return count.load(std::memory_order_acquire);
+        std::lock_guard<std::mutex> lock(mutex);
+        return count;
     }
 
 private:
     const size_t capacity;
     std::unique_ptr<float[]> buffer;
-    std::atomic<size_t> read_idx;
-    std::atomic<size_t> write_idx;
-    std::atomic<size_t> count; // текущее число фреймов в буфере
+    size_t read_idx = 0;
+    size_t write_idx = 0;
+    size_t count = 0;
 
-    std::mutex cv_mutex;
+    mutable std::mutex mutex;
     std::condition_variable cv;
 };

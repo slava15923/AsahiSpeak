@@ -15,6 +15,7 @@ add_subdirectory(cubeb)
 add_subdirectory(wolfssl-5.9.2-stable)
 add_subdirectory(opus-1.5.2)
 add_subdirectory(ReNameNoise)
+add_subdirectory(CLI11)
 
 add_compile_options(-O3)
 
@@ -36,8 +37,8 @@ target_include_directories(AsahiSpeak PUBLIC
     ${PROJECT_SOURCE_DIR}/wolfssl-5.9.2-stable/wolfssl
     ${PROJECT_SOURCE_DIR}/src
     ${PROJECT_SOURCE_DIR}/opus-1.5.2/include
-    ${WEBRTC_ROOT}/ReNameNoise/include
-    
+    ${PROJECT_SOURCE_DIR}/ReNameNoise/include
+    ${PROJECT_SOURCE_DIR}/CLI11/include/CLI
 )
 
 if(NOT WIN32)

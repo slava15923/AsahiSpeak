@@ -204,8 +204,12 @@ class AudioTransmission {
 
         void addServerSert(const char *file) {
             if (wolfSSL_CTX_load_verify_locations(ctx, file, 0) != SSL_SUCCESS) {
-                //wolfSSL_CTX_set_verify(ctx, SSL_VERIFY_NONE, 0);
+                //
                 throw std::runtime_error("CA certificates not loaded, trying without verification");
             }
+        }
+        
+        void offCertVerify() {
+            wolfSSL_CTX_set_verify(ctx, SSL_VERIFY_NONE, 0);
         }
 };

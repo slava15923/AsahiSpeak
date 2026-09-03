@@ -27,7 +27,7 @@ public:
 
 private:
     // 使用智能指针管理资源
-    uint PCM_SCALE = 32768;
+    unsigned int PCM_SCALE = 32768;
     int FRAME_SIZE_ = 480;
     std::unique_ptr<ReNameNoiseDenoiseState, decltype(&renamenoise_destroy)> state_;
 };

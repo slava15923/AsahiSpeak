@@ -26,9 +26,10 @@ openssl req -new -x509 -key server-key.pem -out server-cert.pem -days 365 -subj 
 
 cmake -DWOLFSSL_EXAMPLES=no -DWOLFSSL_CRYPT_TESTS=no -DWOLFSSL_DTLS=ON -DWOLFSSL_DTLS13=ON -DWOLFSSL_DTLS_CID=ON -DWOLFSSL_USER_IO=on-DDEBUG_WOLFSSL=ON -DWOLFSSL_OPENSSLEXTRA=YES -DBUILD_TESTING=OFF -DWOLFSSL_BUILD_TESTS=OFF .. && cmake --build . -j 16
 
-старт клиента: ./AsahiSpeak ip port
+старт клиента: ./AsahiSpeak 
 
-sudo apt update
-sudo apt install libwebrtc-audio-processing-dev pkg-config
-sudo apt install meson ninja-build pkg-config
-sudo apt install libabsl-dev
+--user - username
+--password - password
+--address - ip or dns
+--port - set port(standart: 15923)
+--no-verifi - off verifi cert(no recomendeted)

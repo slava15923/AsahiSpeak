@@ -14,6 +14,7 @@
 #include "network.hpp"
 #include "AudioTransmission.hpp"
 #include <audioIO.hpp>
+#include "cli.hpp"
 
 
 
@@ -112,16 +113,12 @@ int main(int argc, char* argv[]) {
     #ifdef _WIN32
         HRESULT hr = CoInitializeEx(NULL, COINIT_MULTITHREADED);
     #endif
-    char* ip;
-    uint16_t port;
-    char* username;
-    char* password;
+    #ifdef _WIN32
+        WSADATA wsaData;
+        WSAStartup(MAKEWORD(2, 2), &wsaData);
+    #endif
 
-    if(argc < 3) {
-        throw std::runtime_error("не хватает аргументов");
-    }
-    ip = argv[1];
-    port = std::stoi(argv[2]);
+    CLI_DATA data = parseCli(argc, argv);
 
     std::cout << "hello world" << std::endl;
 
@@ -150,19 +147,15 @@ int main(int argc, char* argv[]) {
 
     std::cout << latency_frames << std::endl;
 
-    #ifdef _WIN32
-        WSADATA wsaData;
-        WSAStartup(MAKEWORD(2, 2), &wsaData);
-    #endif
-
 
     
     
 
     wolfSSL_Init();
-    AudioTransmission udpClient(ip, port, "admin", "admin", 0, micro.getBuffer(), dinamic.getBuffer());
+    AudioTransmission udpClient(data.ip.c_str(), data.port, data.username.c_str(), data.password.c_str(), 0, micro.getBuffer(), dinamic.getBuffer());
 
-    udpClient.addServerSert("server-cert.pem");
+    //udpClient.addServerSert("server-cert.pem");
+    if(data.serverCertVerifi) udpClient.offCertVerify();
 
     udpClient.startTransmission();
 
