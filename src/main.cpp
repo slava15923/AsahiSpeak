@@ -4,7 +4,6 @@
 #include <mutex>
 #include <atomic>
 
-#include <SFML/Audio.hpp>
 #include <cubeb/cubeb.h>
 #include <string.h>
 

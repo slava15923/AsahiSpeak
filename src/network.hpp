@@ -68,7 +68,7 @@ struct networkDataAudio {
     int sizeFrames;
     char username[8];
     char password[8];
-    uint channel;
+    unsigned int channel;
     unsigned char frames[160];
 };
 

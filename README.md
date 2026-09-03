@@ -33,3 +33,7 @@ cmake -DWOLFSSL_EXAMPLES=no -DWOLFSSL_CRYPT_TESTS=no -DWOLFSSL_DTLS=ON -DWOLFSSL
 --address - ip or dns
 --port - set port(standart: 15923)
 --no-verifi - off verifi cert(no recomendeted)
+
+https://github.com/CLIUtils/CLI11.git
+https://github.com/mozilla/cubeb.git
+https://github.com/mumble-voip/ReNameNoise.git
