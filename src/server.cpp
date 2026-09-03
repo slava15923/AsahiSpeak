@@ -178,7 +178,7 @@
                     perror("select");
                     break;
                 } else if (sel_ret == 0) {
-                    fprintf(stderr, "Тайм-аут ожидания первого пакета\n");
+                    //fprintf(stderr, "Тайм-аут ожидания первого пакета\n");
                     break;  // или continue, если нужно ждать дальше
                 }
                 int n = recvfrom(cfg.server_fd, buf, sizeof(buf), 0, (struct sockaddr*)&client_addr, &client_len);
@@ -214,7 +214,7 @@
     void freeAfkClient() {
         std::vector<uint64_t> hashSessionsForDelete;
         while(true) {
-            printf("отключился клиент:dsdasds d");
+            //printf("отключился клиент:dsdasds d");
             for(auto hash : sessionsHash) {
                 if(sessions[hash].get()->lastUse() >= SERVER_TIME_OUT) {
                     hashSessionsForDelete.push_back(hash);

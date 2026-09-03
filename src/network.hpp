@@ -45,7 +45,7 @@ void error_handling(const char *msg) {
 
 
 
-typedef struct networkDataAudio {
+struct networkDataAudio {
     char cmd;
     int sizeFrames;
     char username[8];

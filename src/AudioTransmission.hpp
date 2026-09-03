@@ -39,6 +39,7 @@ class AudioTransmission {
 
         OpusEncoder* encoder;
         OpusDecoder* decoder;
+        
 
         int error = 0;
 
@@ -74,7 +75,7 @@ class AudioTransmission {
                 n = recordBuffer.readBlocking(tempPCMData.get(), FRAME_SIZE);
 
                 if (n == FRAME_SIZE) {
-                    opus_encode_float(encoder,tempPCMData.get(),FRAME_SIZE, send.get()->frames, 160);
+                    (void)opus_encode_float(encoder,tempPCMData.get(),FRAME_SIZE, send.get()->frames, 160);
                     //std::cout << send.get()->frames[0] << std::endl;
                     if (wolfSSL_write(ssl, send.get(), sizeof(networkDataAudio)) != (int)sizeof(networkDataAudio)) {
                         fprintf(stderr, "wolfSSL_write failed\n");
@@ -172,6 +173,8 @@ class AudioTransmission {
             if (error != OPUS_OK) {
                 std::cerr << "Ошибка создания декодера: " << opus_strerror(error) << std::endl;
             }
+
+
 
             
         }

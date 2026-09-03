@@ -3,6 +3,37 @@
 #include <cubeb/cubeb.h>
 #include "LockFreeRingBuffer.hpp"
 #include "network.hpp"
+#include <filesystem>
+#include <audio.hpp>
+#include <renamenoise.h>
+#include <array>
+
+class RNNoiseDenoiser {
+public:
+    RNNoiseDenoiser() : state_(renamenoise_create(NULL), renamenoise_destroy) {}
+
+    void processFrame(const float* input, float* output) {
+        float in_scaled[960];
+        for (size_t i = 0; i < FRAME_SIZE_; ++i) {
+            in_scaled[i] = input[i] * PCM_SCALE;
+        }
+        renamenoise_process_frame(state_.get(), output, in_scaled);
+        // Выходной буфер теперь содержит значения в диапазоне [-32768, 32767]
+        // Если нужно вернуть [-1, 1], поделите:
+        for (size_t i = 0; i < FRAME_SIZE_; ++i) {
+            output[i] /= PCM_SCALE;
+        }
+    }
+
+private:
+    // 使用智能指针管理资源
+    uint PCM_SCALE = 32768;
+    int FRAME_SIZE_ = 480;
+    std::unique_ptr<ReNameNoiseDenoiseState, decltype(&renamenoise_destroy)> state_;
+};
+
+
+
 
 class audioInput {
     private:
@@ -13,6 +44,7 @@ class audioInput {
         uint32_t rate;
         uint32_t latency;
         cubeb* ctx;
+        std::thread noiseThread;
 
         /*функция для работы с МОНО микрофоном в cubeb*/
         static long data_micro(cubeb_stream * stm, void * user,
@@ -32,6 +64,20 @@ class audioInput {
             //return CUBEB_OK;
         }
 
+        void audio_processing_worker_thread() {
+            RNNoiseDenoiser noise;
+            const int frame_size = 480;
+            auto temp1 = std::make_unique<float[]>(frame_size);
+            auto temp2 = std::make_unique<float[]>(frame_size);
+
+            while(true) {
+                if(noiseCancellation.readBlocking(temp1.get(),frame_size) == frame_size) {
+                    noise.processFrame(temp1.get(), temp2.get());
+                    buffer.write(temp2.get(), frame_size);
+                }
+            }
+        }
+
     public:
         audioInput(cubeb* ctx_, const uint32_t& rate_, const uint32_t& latency_) : ctx(ctx_), rate(rate_), latency(latency_),
         buffer(RING_SIZE), noiseCancellation(RING_SIZE) {
@@ -43,15 +89,17 @@ class audioInput {
 
             int err = cubeb_stream_init(ctx, &stm, "Test", NULL, 
                 &input_params, NULL, NULL, latency, 
-                data_micro, state_cb, &buffer);
+                data_micro, state_cb, &noiseCancellation);
 
             if (err != CUBEB_OK) {
-                // Например, выбросить исключение
                 throw std::runtime_error("cubeb_stream_init failed");
             }
         }
 
-        void startRecord() {cubeb_stream_start(stm);}
+        void startRecord() {
+            cubeb_stream_start(stm);
+            noiseThread = std::thread(&audioInput::audio_processing_worker_thread,this);
+        }
 
         void stop() {cubeb_stream_stop(stm);}
 
@@ -60,6 +108,7 @@ class audioInput {
         ~audioInput() {
             stop();
             cubeb_stream_destroy(stm);
+            //renamenoise_destroy(st);
         }
 };
 
@@ -92,7 +141,7 @@ class audioOut {
             //std::cout << "writeDataDinamic" << nframes << std::endl;
             return nframes;
         }
-        
+
         static void state_cb(cubeb_stream *stream, void *user_ptr, cubeb_state state) {
             printf("Состояние потока изменилось: %d\n", state);
             //return CUBEB_OK;

@@ -13,7 +13,6 @@ public:
         read_idx.store(0, std::memory_order_relaxed);
         write_idx.store(0, std::memory_order_relaxed);
         count.store(0, std::memory_order_relaxed);
-
     }
 
     ~LockFreeRingBuffer() = default;
@@ -23,9 +22,10 @@ public:
     size_t write(const float* src, size_t frames) {
         if (frames == 0) return 0;
 
-        size_t w = write_idx.load(std::memory_order_relaxed);
-        size_t r = read_idx.load(std::memory_order_acquire);
-        size_t c = count.load(std::memory_order_acquire);
+        // Загружаем текущие индексы и счётчик
+        size_t w = write_idx.load(std::memory_order_relaxed);  // только пишущий поток
+        size_t r = read_idx.load(std::memory_order_acquire);   // видеть свежий read_idx
+        size_t c = count.load(std::memory_order_acquire);      // видеть свежий count
 
         size_t free_space = capacity - c;
         size_t overwrite = 0;
@@ -33,7 +33,7 @@ public:
             overwrite = frames - free_space;
         }
 
-        // Копируем данные в буфер
+        // Копируем данные в буфер (две части, если переход через границу)
         size_t first_part = capacity - w;
         size_t copy1 = (frames < first_part) ? frames : first_part;
         memcpy(buffer.get() + w, src, copy1 * sizeof(float));
@@ -41,22 +41,23 @@ public:
             memcpy(buffer.get(), src + copy1, (frames - copy1) * sizeof(float));
         }
 
-        // Обновляем write_idx
+        // Обновляем write_idx (читатель его не использует, но для порядка с буфером можно release)
         size_t new_w = (w + frames) % capacity;
         write_idx.store(new_w, std::memory_order_release);
 
+        // Критическое обновление состояния: read_idx и count должны быть видны согласованно.
         if (overwrite > 0) {
-            // Сдвигаем read_idx вперёд на количество перезаписанных фреймов
             size_t new_r = (r + overwrite) % capacity;
-            read_idx.store(new_r, std::memory_order_release);
-            count.store(capacity, std::memory_order_release);
+            // Используем seq_cst, чтобы гарантировать порядок записи обеих переменных
+            read_idx.store(new_r, std::memory_order_seq_cst);
+            count.store(capacity, std::memory_order_seq_cst);
         } else {
-            count.store(c + frames, std::memory_order_release);
+            // Меняется только count, read_idx не меняется – достаточно release,
+            // но для единообразия используем seq_cst (небольшие накладные расходы)
+            count.store(c + frames, std::memory_order_seq_cst);
         }
-        
 
         cv.notify_one();
-
         return frames;
     }
 
@@ -64,12 +65,14 @@ public:
     size_t read(float* dst, size_t frames) {
         if (frames == 0) return 0;
 
-        size_t r = read_idx.load(std::memory_order_relaxed);
+        // Загружаем read_idx и count с acquire, чтобы видеть последние изменения
+        size_t r = read_idx.load(std::memory_order_acquire);
         size_t c = count.load(std::memory_order_acquire);
         size_t available = c;
         size_t to_read = (frames < available) ? frames : available;
         if (to_read == 0) return 0;
 
+        // Копируем данные
         size_t first_part = capacity - r;
         size_t copy = (to_read < first_part) ? to_read : first_part;
         memcpy(dst, buffer.get() + r, copy * sizeof(float));
@@ -77,9 +80,10 @@ public:
             memcpy(dst + copy, buffer.get(), (to_read - copy) * sizeof(float));
         }
 
+        // Обновляем read_idx и count согласованно (seq_cst)
         size_t new_r = (r + to_read) % capacity;
-        read_idx.store(new_r, std::memory_order_release);
-        count.store(c - to_read, std::memory_order_release);
+        read_idx.store(new_r, std::memory_order_seq_cst);
+        count.store(c - to_read, std::memory_order_seq_cst);
 
         return to_read;
     }
@@ -105,26 +109,17 @@ public:
         }
 
         if (!ready) {
-            return 0; // таймаут – не читаем
+            return 0;
         }
 
-        // Теперь count >= frames, но за время ожидания могла произойти перезапись,
-        // поэтому всё равно используем обычное read (оно прочитает сколько сможет).
-        // Обычно read вернёт frames, если только писатель не перезаписал данные,
-        // которые мы собирались читать – тогда вернёт меньше.
+        // После пробуждения вызываем обычное read – оно уже корректно обработает согласованность
         return read(dst, frames);
     }
 
-    // Опционально: получить текущее количество доступных фреймов (без блокировки)
+    // Получить текущее количество доступных фреймов (без блокировки)
     size_t available() const {
         return count.load(std::memory_order_acquire);
     }
-
-    // threshold - порог амплитуды (0..1), ниже которого звук глушится
-    // attackTime - время открытия в секундах (обычно 0.001–0.01)
-    // releaseTime - время закрытия в секундах (обычно 0.05–0.2)
-    // sampleRate - частота дискретизации
-
 
 private:
     const size_t capacity;
@@ -135,5 +130,4 @@ private:
 
     std::mutex cv_mutex;
     std::condition_variable cv;
-
 };

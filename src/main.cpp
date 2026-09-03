@@ -15,6 +15,8 @@
 #include "AudioTransmission.hpp"
 #include <audioIO.hpp>
 
+
+
 #ifdef _WIN32
     #include <combaseapi.h>
 
@@ -114,7 +116,6 @@ int main(int argc, char* argv[]) {
     uint16_t port;
     char* username;
     char* password;
-    std::cout << argc << std::endl;
 
     if(argc < 3) {
         throw std::runtime_error("не хватает аргументов");
