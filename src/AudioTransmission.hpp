@@ -39,6 +39,8 @@ class AudioTransmission {
 
         OpusEncoder* encoder;
         OpusDecoder* decoder;
+
+        std::string username;
         
 
         int error = 0;
@@ -69,13 +71,15 @@ class AudioTransmission {
             //networkDataAudio* dataForSend = new networkDataAudio;
             std::unique_ptr<float[]> tempPCMData;
             tempPCMData = std::make_unique<float[]>(FRAME_SIZE);
+
+            strcpy(send.get()->username, username.c_str());
             int n;
 
             while(running) {
                 n = recordBuffer.readBlocking(tempPCMData.get(), FRAME_SIZE);
 
                 if (n == FRAME_SIZE) {
-                    (void)opus_encode_float(encoder,tempPCMData.get(),FRAME_SIZE, send.get()->frames, 160);
+                    n = opus_encode_float(encoder,tempPCMData.get(),FRAME_SIZE, send.get()->frames, 160);
                     //std::cout << send.get()->frames[0] << std::endl;
                     if (wolfSSL_write(ssl, send.get(), sizeof(networkDataAudio)) != (int)sizeof(networkDataAudio)) {
                         fprintf(stderr, "wolfSSL_write failed\n");
@@ -132,10 +136,10 @@ class AudioTransmission {
 
     public:
         AudioTransmission(const char* ip, uint16_t port, 
-            const char* username, const char* password, 
+            const char* username_, const char* password, 
             int numchannel, LockFreeRingBuffer& recordBuffer_, 
             LockFreeRingBuffer& readBuffer_) 
-            : recordBuffer(recordBuffer_), readBuffer(readBuffer_) {
+            : recordBuffer(recordBuffer_), readBuffer(readBuffer_), username(username_) {
 
             sock = create_udp_socket();
 
@@ -156,7 +160,7 @@ class AudioTransmission {
 
             ctx = wolfSSL_CTX_new(wolfDTLSv1_2_client_method());
             if (!ctx) error_handling("wolfSSL_CTX_new failed");
-            wolfSSL_CTX_load_system_CA_certs(ctx);
+            std::cout << "загрузка системных корневых сертификатов: " << wolfSSL_CTX_load_system_CA_certs(ctx) << std::endl;
 
             encoder = opus_encoder_create(SAMPLE_RATE, 1, OPUS_APPLICATION_AUDIO, &error);
             if (error != OPUS_OK) {

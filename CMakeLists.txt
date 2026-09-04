@@ -11,6 +11,8 @@ set(WOLFSSL_OPENSSLCOEXIST ON CACHE BOOL "" FORCE)
 set(WOLFSSL_DTLS ON CACHE BOOL "" FORCE)
 set(WOLFSSL_DTLS_CID ON CACHE BOOL "" FORCE)
 
+set(CLI11_BUILD_TESTS OFF CACHE BOOL "Disable CLI11 tests")
+
 add_subdirectory(cubeb)
 add_subdirectory(wolfssl-5.9.2-stable)
 add_subdirectory(opus-1.5.2)

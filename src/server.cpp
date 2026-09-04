@@ -107,7 +107,10 @@
             if (ret > 0) {
                 if(ret == sizeof(networkDataAudio)){
                     networkDataAudio* data = reinterpret_cast<networkDataAudio*>(buf);
-                    if(username.has_value()) *username = data->username;
+                    if(!username.has_value()) {
+                        username = data->username;
+                        std::cout << *username << " conected" << std::endl;
+                    }
                     memset(data->password, 0, sizeof(networkDataAudio::password));
                     //username = audio->username;
                     wolfSSL_write(ssl, buf, ret);
@@ -141,7 +144,9 @@
             return seconds_passed;
         }
         std::string getUserName() {
-            return *username;
+            if(username.has_value()) return *username;
+            
+            return std::string();
         }
     };
 
@@ -250,10 +255,8 @@
     }
 
     int main() {
-        #ifdef _WIN32
-            WSADATA wsaData;
-            WSAStartup(MAKEWORD(2, 2), &wsaData);
-        #endif
+        char cwd[1024];
+        if (getcwd(cwd, sizeof(cwd)) != NULL) printf("cwd: %s\n", cwd);
         //std::cout << SSL_ERROR_WANT_READ << std::endl;
         
         
@@ -276,10 +279,26 @@
         wolfSSL_CTX_SetIOSend(ctx, sendCallback);
 
         /* 2. Загрузка сертификата и ключа */
-        if (wolfSSL_CTX_use_certificate_file(ctx, "server-cert.pem", SSL_FILETYPE_PEM) != SSL_SUCCESS)
-            error_handling("Failed to load server certificate");
-        if (wolfSSL_CTX_use_PrivateKey_file(ctx, "server-key.pem", SSL_FILETYPE_PEM) != SSL_SUCCESS)
-            error_handling("Failed to load server private key");
+        //if (wolfSSL_CTX_use_certificate_file(ctx, "server-cert.pem", SSL_FILETYPE_PEM) != SSL_SUCCESS)
+        //    error_handling("Failed to load server certificate");
+        //if (wolfSSL_CTX_use_PrivateKey_file(ctx, "server-key.pem", SSL_FILETYPE_PEM) != SSL_SUCCESS)
+        //    error_handling("Failed to load server private key");
+        // Загружаем цепочку сертификатов (ваш сертификат + промежуточные)
+        if (wolfSSL_CTX_use_certificate_chain_file(ctx, "fullchain.pem") != SSL_SUCCESS) {
+            char err[256];
+            unsigned long e = wolfSSL_ERR_get_error();
+            wolfSSL_ERR_error_string(e, err);
+            printf("SSL error: %s (code %lu)\n", err, e);
+        }
+
+        // Загружаем приватный ключ
+        if (wolfSSL_CTX_use_PrivateKey_file(ctx, "private.key", SSL_FILETYPE_PEM) != SSL_SUCCESS) {
+            char err[256];
+            unsigned long e = wolfSSL_ERR_get_error();
+            wolfSSL_ERR_error_string(e, err);
+            printf("SSL error: %s (code %lu)\n", err, e);
+        }
+
 
         //int client_fd;
         int server_fd;
