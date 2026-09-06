@@ -11,6 +11,7 @@ struct CLI_DATA {
     std::string pathToCert;
     bool serverCertVerifi = false;
     const std::string version = VERSION;
+    unsigned int channel;
 }; 
 
 CLI_DATA parseCli(int argc, char** argv) {
@@ -22,6 +23,7 @@ CLI_DATA parseCli(int argc, char** argv) {
     app.add_option("-u,--user", data.username, "Имя пользователя")->required();
     app.add_option("-p,--password", data.password, "Пароль")->required();
     app.add_option("-a,--address", data.ip, "IP-адрес сервера")->required();
+    app.add_option("-c,--channel", data.channel, "канал на сервере")->required();
 
     app.add_option("--port", data.port, "Порт сервера");
     app.add_option("--cert", data.pathToCert, "Путь к SSL-сертификату");

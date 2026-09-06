@@ -41,6 +41,8 @@ class AudioTransmission {
         OpusDecoder* decoder;
 
         std::string username;
+
+        int numchannel;
         
 
         int error = 0;
@@ -71,6 +73,7 @@ class AudioTransmission {
             //networkDataAudio* dataForSend = new networkDataAudio;
             std::unique_ptr<float[]> tempPCMData;
             tempPCMData = std::make_unique<float[]>(FRAME_SIZE);
+            send.get()->channel = numchannel;
 
             strcpy(send.get()->username, username.c_str());
             int n;
@@ -137,9 +140,9 @@ class AudioTransmission {
     public:
         AudioTransmission(const char* ip, uint16_t port, 
             const char* username_, const char* password, 
-            int numchannel, LockFreeRingBuffer& recordBuffer_, 
+            int numchannel_, LockFreeRingBuffer& recordBuffer_, 
             LockFreeRingBuffer& readBuffer_) 
-            : recordBuffer(recordBuffer_), readBuffer(readBuffer_), username(username_) {
+            : recordBuffer(recordBuffer_), readBuffer(readBuffer_), username(username_), numchannel(numchannel_) {
 
             sock = create_udp_socket();
 

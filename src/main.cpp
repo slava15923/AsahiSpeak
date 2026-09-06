@@ -151,7 +151,7 @@ int main(int argc, char* argv[]) {
     
 
     wolfSSL_Init();
-    AudioTransmission udpClient(data.ip.c_str(), data.port, data.username.c_str(), data.password.c_str(), 0, micro.getBuffer(), dinamic.getBuffer());
+    AudioTransmission udpClient(data.ip.c_str(), data.port, data.username.c_str(), data.password.c_str(), data.channel, micro.getBuffer(), dinamic.getBuffer());
 
     //udpClient.addServerSert("server-cert.pem");
     if(data.serverCertVerifi) udpClient.offCertVerify();
