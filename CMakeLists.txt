@@ -13,6 +13,8 @@ set(WOLFSSL_DTLS_CID ON CACHE BOOL "" FORCE)
 
 set(CLI11_BUILD_TESTS OFF CACHE BOOL "Disable CLI11 tests")
 
+set(BUILD_TESTS OFF CACHE BOOL "Disable cubeb tests" FORCE)
+
 add_subdirectory(cubeb)
 add_subdirectory(wolfssl-5.9.2-stable)
 add_subdirectory(opus-1.5.2)
@@ -25,7 +27,10 @@ set(CMAKE_BUILD_TYPE Debug)
 
 add_executable(AsahiSpeak src/main.cpp)
 
-
+target_compile_options(AsahiSpeak PRIVATE
+    $<$<C_COMPILER_ID:GNU,Clang>:-fno-inline -fno-inline-functions>
+    $<$<CXX_COMPILER_ID:GNU,Clang>:-fno-inline -fno-inline-functions>
+)
 
 target_compile_features(AsahiSpeak PRIVATE cxx_std_20)
 

@@ -141,3 +141,22 @@ public:
         }
     }
 };
+
+/**
+ * Добавляет моно-буфер src к моно-буферу dst с накоплением:
+ * dst[i] = dst[i] + src[i] * gain, с клиппингом в [-1.0, 1.0]
+ * 
+ * @param dst          Выходной буфер (читается и перезаписывается)
+ * @param src          Входной буфер (прибавляется к dst)
+ * @param num_samples  Количество сэмплов (для 20мс/48кГц = 960)
+ * @param gain         Коэффициент усиления для src (рекомендую 1.0/N)
+ */
+void mix_add_mono(float *dst, const float *src, size_t num_samples, float gain) {
+    for (size_t i = 0; i < num_samples; ++i) {
+        float val = dst[i] + src[i] * gain;
+        // Защита от переполнения (жёсткий клиппинг)
+        if (val > 1.0f) val = 1.0f;
+        else if (val < -1.0f) val = -1.0f;
+        dst[i] = val;
+    }
+}

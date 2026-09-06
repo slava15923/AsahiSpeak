@@ -40,16 +40,23 @@
         std::chrono::steady_clock::time_point last_used;
         bool handshake_done = false;   // <-- новый флаг
         char* buf;
-        int sizeBuf = 5000;
+        int sizeBuf = sizeof(networkDataAudio);
         char errstr[256];
 
         std::queue<networkDataAudio> dataForSend;
         std::mutex mutex;
         std::optional<std::string> username;
+        int channel;
+        std::vector<std::vector<uint64_t>>& usersInChannels;
+        std::unordered_map<uint64_t, std::unique_ptr<SessionData>>& users;
+        std::vector<uint64_t>& sessionsHash;
 
         SessionData(const uint64_t& clientHash_, socket_t server_fd_,
-                    WOLFSSL_CTX* ctx, const struct sockaddr_in addr_)
-            : clientHash(clientHash_), addr(addr_), server_fd(server_fd_), addr_len(sizeof(addr_)) {
+                    WOLFSSL_CTX* ctx, const struct sockaddr_in addr_,
+                    std::vector<std::vector<uint64_t>>& usersInChannels_,
+                    std::unordered_map<uint64_t, std::unique_ptr<SessionData>>& users_, std::vector<uint64_t>& sessionsHash_)
+            : clientHash(clientHash_), addr(addr_), server_fd(server_fd_), addr_len(sizeof(addr_)), usersInChannels(usersInChannels_),
+                users(users_), sessionsHash(sessionsHash_) {
             ssl = wolfSSL_new(ctx);
             if (!ssl) throw std::runtime_error("wolfSSL_new failed");
 
@@ -68,7 +75,16 @@
         }
 
         ~SessionData() {
-            std::lock_guard<std::mutex> lock(mutex);
+            //std::lock_guard<std::mutex> lock(mutex);
+            if (username.has_value()) {
+                auto &vec = usersInChannels[channel];
+                vec.erase(std::remove(vec.begin(), vec.end(), clientHash), vec.end());
+            }
+            sessionsHash.erase(
+                std::remove(sessionsHash.begin(), sessionsHash.end(), clientHash), 
+                sessionsHash.end()
+            );
+            //users.erase(clientHash);
             if (ssl) wolfSSL_free(ssl);
         }
 
@@ -109,11 +125,19 @@
                     networkDataAudio* data = reinterpret_cast<networkDataAudio*>(buf);
                     if(!username.has_value()) {
                         username = data->username;
+                        channel = data->channel;
+                        usersInChannels[channel].push_back(clientHash);
                         std::cout << *username << " conected" << std::endl;
                     }
                     memset(data->password, 0, sizeof(networkDataAudio::password));
+                    for(auto& user : usersInChannels[channel]) {
+                        if(user != clientHash) {
+                            //user.get()->send(buf, ret);
+                            users[user].get()->send(buf,ret);
+                        }
+                    }
                     //username = audio->username;
-                    wolfSSL_write(ssl, buf, ret);
+                    //wolfSSL_write(ssl, buf, ret);
                     updateLastUsed();
                 }
             } else if (ret == 0) {
@@ -129,6 +153,10 @@
             }
 
             return true;
+        }
+
+        void send(const char* buffer, size_t size) {
+            wolfSSL_write(ssl, buffer, size);
         }
 
         void retransmitHandshake() {
@@ -152,6 +180,9 @@
 
     std::unordered_map<uint64_t, std::unique_ptr<SessionData>> sessions;
     std::vector<uint64_t> sessionsHash;
+    std::vector<std::vector<uint64_t>> usersInChannels(256);
+
+    std::mutex delAndAt;
 
 
     /* Обработчик сигнала SIGINT (Ctrl+C) */
@@ -209,22 +240,24 @@
                 uint64_t clientHash = addr_hash(client_addr);
 
 
+                {
+                    std::lock_guard m(delAndAt);
+                    if(sessions.count(clientHash)) {
+                        try{
+                            sessions.at(clientHash).get()->processIncoming(buf, n);
+                        } catch(const std::out_of_range& e) {}
+                        //std::cout << clientHash << "a" << std::endl;
+                    } else {
+                        sessions.insert({clientHash, std::make_unique<SessionData>(clientHash, cfg.server_fd, cfg.ctx, client_addr, usersInChannels, sessions, sessionsHash)});
+                        sessionsHash.push_back(clientHash);
+                        sessions[clientHash].get()->processIncoming(buf, n);
+                        
 
-                if(sessions.count(clientHash)) {
-                    try{
-                        sessions.at(clientHash).get()->processIncoming(buf, n);
-                    } catch(const std::out_of_range& e) {}
-                    //std::cout << clientHash << "a" << std::endl;
-                } else {
-                    sessions.insert({clientHash, std::make_unique<SessionData>(clientHash, cfg.server_fd, cfg.ctx, client_addr)});
-                    sessionsHash.push_back(clientHash);
-                    sessions[clientHash].get()->processIncoming(buf, n);
-                    
-
-                    printf("новый коннект: %s:%d\n",
-                    inet_ntoa(client_addr.sin_addr), ntohs(client_addr.sin_port));
-                    std::cout << clientHash << std::endl;
-                    std::cout << sessions[clientHash].get()->getUserName() << std::endl;
+                        printf("новый коннект: %s:%d\n",
+                        inet_ntoa(client_addr.sin_addr), ntohs(client_addr.sin_port));
+                        std::cout << clientHash << std::endl;
+                        std::cout << sessions[clientHash].get()->getUserName() << std::endl;
+                    }
                 }
             }
         }
@@ -241,8 +274,12 @@
             }
 
             for(auto hash : hashSessionsForDelete) {
-                sessions.erase(hash);
-                std::erase(sessionsHash, hash);
+                //sessions.erase(hash);
+                {
+                    std::lock_guard m(delAndAt);
+                    //sessions.at(hash).get()->~SessionData();
+                    sessions.erase(hash);
+                }
                 std::cout << "отключился клиент: " << hash << std::endl;
             }
 

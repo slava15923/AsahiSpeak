@@ -65,10 +65,10 @@ void error_handling(const char *msg) {
 
 struct networkDataAudio {
     char cmd;
-    int sizeFrames;
+    //int sizeFrames;
     char username[33];
     char password[8];
-    unsigned int channel;
+    unsigned char channel;
     unsigned char frames[160];
 };
 
