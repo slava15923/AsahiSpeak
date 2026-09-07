@@ -34,7 +34,7 @@ target_compile_options(AsahiSpeak PRIVATE
 
 target_compile_features(AsahiSpeak PRIVATE cxx_std_20)
 
-target_link_libraries(AsahiSpeak PRIVATE cubeb wolfssl opus renamenoise CLI11::CLI11)
+target_link_libraries(AsahiSpeak PRIVATE cubeb wolfssl opus renamenoise CLI11::CLI11 -static -static-libgcc -static-libstdc++)
 
 
 target_include_directories(AsahiSpeak PUBLIC 
