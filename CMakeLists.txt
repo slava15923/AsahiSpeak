@@ -3,6 +3,18 @@ project(AsahiSpeak)
 
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
+if (MINGW)
+    # Принудительно собираем все библиотеки как статические
+    set(BUILD_SHARED_LIBS OFF CACHE BOOL "Build static libraries only" FORCE)
+    
+    # Глобальные флаги для линковщика (применяются ко всем исполняемым файлам)
+    set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -static -static-libgcc -static-libstdc++")
+    
+    # Дополнительно прописываем эти же флаги в CXX_FLAGS (иногда требуется)
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -static-libgcc -static-libstdc++")
+endif()
+
+
 add_compile_definitions(WOLFSSL_DTLS_MTU WOLFSSL_DTLS WOLFSSL_DTLS_CID)
 
 set(WOLFSSL_OPENSSLEXTRA ON CACHE BOOL "" FORCE)
@@ -34,7 +46,7 @@ target_compile_options(AsahiSpeak PRIVATE
 
 target_compile_features(AsahiSpeak PRIVATE cxx_std_20)
 
-target_link_libraries(AsahiSpeak PRIVATE cubeb wolfssl opus renamenoise CLI11::CLI11 -static -static-libgcc -static-libstdc++)
+target_link_libraries(AsahiSpeak PRIVATE cubeb wolfssl opus renamenoise CLI11::CLI11)
 
 
 target_include_directories(AsahiSpeak PUBLIC 
