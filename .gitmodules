@@ -1,0 +1,9 @@
+[submodule "cubeb"]
+	path = cubeb
+	url = https://github.com/mozilla/cubeb.git
+[submodule "CLI11"]
+	path = CLI11
+	url = https://github.com/CLIUtils/CLI11.git
+[submodule "ReNameNoise"]
+	path = ReNameNoise
+	url = https://github.com/mumble-voip/ReNameNoise.git

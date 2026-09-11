@@ -1,0 +1,12 @@
+build/
+.vscode/
+.vscodes/
+.DS_Store
+Thumbs.db
+*.log
+*.tmp
+*.swp
+*.swo
+.env
+.secrets
+test/
