@@ -14,8 +14,7 @@
 
 class ClientIdMap {
 public:
-    // Возвращает стабильный id 0..63 для данного хеша или UINT32_MAX при переполнении
-    uint32_t Get(uint32_t hash, int MAX_CLIENTS=64) {
+    uint32_t Get(uint32_t hash, int MAX_CLIENTS = 64) {
         auto it = map_.find(hash);
         if (it != map_.end()) return it->second;
         if (nextId_ >= MAX_CLIENTS) return UINT32_MAX;
@@ -23,6 +22,23 @@ public:
         map_[hash] = id;
         return id;
     }
+
+    uint32_t Remove(uint32_t hash) {
+        auto it = map_.find(hash);
+        if (it == map_.end()) return UINT32_MAX;
+        uint32_t id = it->second;
+        map_.erase(it);
+        return id;
+    }
+
+    // (опционально) true, если запись существует
+    bool Contains(uint32_t hash) const {
+        return map_.find(hash) != map_.end();
+    }
+
+    // (опционально) текущее число клиентов
+    size_t Size() const { return map_.size(); }
+
 private:
     std::unordered_map<uint32_t, uint32_t> map_;
     uint32_t nextId_ = 0;
@@ -44,7 +60,7 @@ class User {
 public:
     User(ClientIdMap& idMap_, const uint32_t& clientHash_, const char* username_) : idMap(idMap_), clientHash(clientHash_), username(username_) {
         mixerHash = idMap.Get(clientHash);
-        std::cout << "подключился: " << username;
+        std::cout << "подключился: " << username << std::endl;
         decoder = opus_decoder_create(SAMPLE_RATE, 1, &error);
         if (error != OPUS_OK) {
             std::cerr << "Ошибка создания декодера: " << opus_strerror(error) << std::endl;
@@ -99,6 +115,8 @@ class AudioTransmission {
         int numchannel;
 
         JitterBufferManager<float, FRAME_SIZE, 64> jitter{3, 10};
+        std::unordered_map<uint32_t, std::unique_ptr<User>> users;
+        ClientIdMap idMap;
 
         
         
@@ -130,24 +148,24 @@ class AudioTransmission {
         }
 
         int readData() {
-            ClientIdMap idMap;
             std::unique_ptr<float[]> tempPCMData;
             JitterBufferManager<float, FRAME_SIZE, 64>::Frame frame;
             int bytes;
             int decoded;
             uint32_t clientHash;
-            std::unordered_map<uint32_t, std::unique_ptr<User>> users;
             //q.reserve(50);
             User* userptr;
+            
             
 
             while(running) {
                 bytes = wolfSSL_read(ssl, receive.get(), sizeof(networkDataAudio));
 
                 if (bytes == (int)sizeof(networkDataAudio)) {
-                    clientHash = fnv1a_32(receive->username, 32);
+                    clientHash = fnv1a_32(receive->username, strlen(receive->username));
                     if (!users.count(clientHash)) {
                         users.insert({clientHash, std::make_unique<User>(idMap,clientHash, receive->username)});
+                        //printf("new user\n");
                     }
                     userptr = users[clientHash].get();
                     decoded = opus_decode_float(userptr->getOpusDecoder(), receive->frames, 160, frame.data(), FRAME_SIZE, 0);

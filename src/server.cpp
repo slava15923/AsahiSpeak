@@ -38,7 +38,7 @@
         uint64_t clientHash;
         socket_t server_fd;
         std::chrono::steady_clock::time_point last_used;
-        bool handshake_done = false;   // <-- новый флаг
+        bool handshake_done = false;
         char* buf;
         int sizeBuf = sizeof(networkDataAudio);
         char errstr[256];
@@ -86,6 +86,7 @@
             );
             //users.erase(clientHash);
             if (ssl) wolfSSL_free(ssl);
+            delete buf;
         }
 
         void updateLastUsed() {

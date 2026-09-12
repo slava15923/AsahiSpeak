@@ -134,17 +134,12 @@ public:
     }
 
     // Только сетевой/control-поток. RT в этот момент не читает (active = false).
-    void RemoveClient(uint32_t clientId) {
+    void RemoveClient(uint32_t clientId) {                       // ← ВОТ СЮДА
         if (clientId >= MAX_CLIENTS) return;
         Slot* c = slots_[clientId].load(std::memory_order_acquire);
         if (!c) return;
-
         c->active.store(false, std::memory_order_release);
-        // RT теперь не зайдёт в Pop(). Очищаем очередь на стороне producer-а.
-        // Небольшой sleep, чтобы RT успел завершить текущий MixInto.
-        // (если RemoveClient вызывается редко — это ок)
-        std::this_thread::sleep_for(std::chrono::milliseconds(5));
-        c->jb.Reset();
+        // слот остаётся в slots_, MixInto его игнорирует по active == false
     }
 
     // ============ ПОТРЕБИТЕЛЬ (RT-микшер) ============

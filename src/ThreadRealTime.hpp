@@ -63,15 +63,10 @@ public:
     }
 
 private:
-    // Обёртка вокруг пользовательской функции: выставляем приоритет,
-    // потом запускаем f. Если приоритет выставить не удалось — не падаем,
-    // просто пишем в stderr и продолжаем (поток важнее, чем RT).
     template <class F, class... Args>
     static void trampoline(int priority, F&& f, Args&&... args) {
         if (priority > 0) {
-            if (!applyPriority(pthread_self_id(), priority)) {
-                // Не бросаем — иначе std::terminate из-за noexcept-контекста.
-                // Можно заменить на логирование в ваш логгер.
+            if (!applyPriority(self_id(), priority)) {
                 std::fprintf(stderr,
                     "[ThreadRealTime] failed to set priority %d: %s\n",
                     priority, std::strerror(errno));
@@ -80,26 +75,24 @@ private:
         std::invoke(std::forward<F>(f), std::forward<Args>(args)...);
     }
 
-    static std::uintptr_t pthread_self_id() noexcept {
+    static std::thread::native_handle_type self_id() noexcept {
         #ifdef _WIN32
-            return reinterpret_cast<std::uintptr_t>(GetCurrentThread());
+            return GetCurrentThread();
         #else
-            return reinterpret_cast<std::uintptr_t>(pthread_self());
+            return pthread_self();
         #endif
     }
 
-    static bool applyPriority(std::uintptr_t handle, int priority) noexcept {
+    static bool applyPriority(std::thread::native_handle_type handle, int priority) noexcept {
         #ifdef _WIN32
-            // Windows: THREAD_PRIORITY_TIME_CRITICAL для RT-аудио.
-            // Требует SeIncreaseBasePriorityPrivilege для REALTIME_PRIORITY_CLASS.
-            HANDLE h = reinterpret_cast<HANDLE>(handle);
+            HANDLE h = handle;
             if (!SetPriorityClass(GetCurrentProcess(), REALTIME_PRIORITY_CLASS))
                 return false;
             return SetThreadPriority(h, THREAD_PRIORITY_TIME_CRITICAL) != 0;
         #else
             sched_param sp{};
             sp.sched_priority = priority;   // 1..99 для SCHED_FIFO
-            pthread_t t = reinterpret_cast<pthread_t>(handle);
+            pthread_t t = handle;
             return pthread_setschedparam(t, SCHED_FIFO, &sp) == 0;
         #endif
     }
