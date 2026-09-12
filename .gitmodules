@@ -7,3 +7,6 @@
 [submodule "ReNameNoise"]
 	path = ReNameNoise
 	url = https://github.com/mumble-voip/ReNameNoise.git
+[submodule "readerwriterqueue"]
+	path = readerwriterqueue
+	url = https://github.com/cameron314/readerwriterqueue.git
