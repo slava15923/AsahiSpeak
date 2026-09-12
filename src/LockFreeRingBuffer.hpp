@@ -1,132 +1,171 @@
 #pragma once
-#include <mutex>
-#include <condition_variable>
+
+#include "readerwriterqueue.h"   // cameron314/readerwriterqueue
+
+#include <atomic>
 #include <chrono>
 #include <cstring>
 #include <memory>
+#include <semaphore>
+#include <condition_variable>
 
 class LockFreeRingBuffer {
 public:
-    LockFreeRingBuffer(size_t capacity_frames)
-        : capacity(capacity_frames), buffer(new float[capacity_frames]) {
-        read_idx = 0;
-        write_idx = 0;
-        count = 0;
-    }
+    explicit LockFreeRingBuffer(size_t capacity_frames)
+        : capacity(capacity_frames),
+          queue(capacity_frames) {}
 
     ~LockFreeRingBuffer() = default;
+    LockFreeRingBuffer(const LockFreeRingBuffer&) = delete;
+    LockFreeRingBuffer& operator=(const LockFreeRingBuffer&) = delete;
 
-    // Записывает все frames, перезаписывая старые данные при заполнении.
-    // Всегда возвращает frames (если frames > 0).
-    size_t write(const float* src, size_t frames) {
+    // ============================================================
+    //  ЧТЕНИЕ (cubeb callback, RT-поток)
+    //  Lock-free; sem_post без блокировки.
+    // ============================================================
+    size_t read(float* dst, size_t frames) noexcept {
         if (frames == 0) return 0;
 
-        // Сначала копируем данные (без блокировки) – используем текущий write_idx
-        size_t w = write_idx; // писатель один, можно читать без синхронизации
-        size_t first_part = capacity - w;
-        size_t copy1 = (frames < first_part) ? frames : first_part;
-        memcpy(buffer.get() + w, src, copy1 * sizeof(float));
-        if (frames > copy1) {
-            memcpy(buffer.get(), src + copy1, (frames - copy1) * sizeof(float));
+        size_t n = 0;
+        float sample;
+        while (n < frames && queue.try_dequeue(sample)) {
+            dst[n++] = sample;
         }
 
-        // Обновляем индексы под мьютексом
-        std::lock_guard<std::mutex> lock(mutex);
-        size_t new_w = (w + frames) % capacity;
-        write_idx = new_w;
-
-        size_t free_space = capacity - count;
-        size_t overwrite = 0;
-        if (frames > free_space) {
-            overwrite = frames - free_space;
+        if (n > 0) {
+            // RT-safe сигнал писателю: освободилось место
+            spaceReady.release();
         }
-        if (overwrite > 0) {
-            read_idx = (read_idx + overwrite) % capacity;
-            count = capacity;
-        } else {
-            count += frames;
+        return n;
+    }
+
+    // ============================================================
+    //  ЗАПИСЬ БЕЗ ПЕРЕЗАПИСИ (микшер)
+    //  Возвращает 0, если места нет. Всё-или-ничего.
+    // ============================================================
+    size_t writeNoOverwrite(const float* src, size_t frames) noexcept {
+        if (frames == 0) return 0;
+        if (frames > capacity) return 0;
+
+        // Точная проверка места (SPSC + release/acquire в очереди => точно)
+        const size_t sz = queue.size_approx();
+        if (sz + frames > capacity) return 0;
+
+        for (size_t i = 0; i < frames; ++i) {
+            // При корректном size_approx не должно упасть;
+            // подстраховка от рассинхронизации на weak-memory.
+            if (!queue.try_enqueue(src[i])) {
+                if (i > 0) dataReady.release();
+                return i;
+            }
         }
 
-        cv.notify_one();
+        dataReady.release();
         return frames;
     }
 
-    // Неблокирующее чтение – возвращает реально прочитанное количество (0 … frames)
-    size_t read(float* dst, size_t frames) {
+    // ============================================================
+    //  ЗАПИСЬ С ПЕРЕЗАПИСЬЮ (микрофон, RT-поток)
+    // ============================================================
+    size_t write(const float* src, size_t frames) noexcept {
         if (frames == 0) return 0;
-
-        size_t r, to_read;
-        {
-            std::lock_guard<std::mutex> lock(mutex);
-            if (count == 0) return 0;
-            to_read = (frames < count) ? frames : count;
-            r = read_idx;
-            read_idx = (r + to_read) % capacity;
-            count -= to_read;
+        if (frames > capacity) {
+            src += (frames - capacity);
+            frames = capacity;
         }
 
-        // Копируем данные вне мьютекса
-        size_t first_part = capacity - r;
-        size_t copy = (to_read < first_part) ? to_read : first_part;
-        memcpy(dst, buffer.get() + r, copy * sizeof(float));
-        if (to_read > copy) {
-            memcpy(dst + copy, buffer.get(), (to_read - copy) * sizeof(float));
+        size_t written = 0;
+        for (size_t i = 0; i < frames; ++i) {
+            if (queue.try_enqueue(src[i])) ++written;
+            else break;
         }
+        if (written > 0) dataReady.release();
+        return written;
+}
 
-        return to_read;
+    // ============================================================
+    //  ОЖИДАНИЕ МЕСТА ДЛЯ МИКШЕРА
+    // ============================================================
+    bool waitForSpace(size_t frames,
+                      const std::atomic<bool>* stopFlag = nullptr,
+                      std::chrono::milliseconds timeout = std::chrono::milliseconds(50)) {
+        if (frames == 0) return true;
+        if (frames > capacity) return false;
+
+        auto deadline = std::chrono::steady_clock::now() + timeout;
+
+        while (true) {
+            if (stopFlag && stopFlag->load()) return false;
+
+            const size_t sz = queue.size_approx();
+            if (capacity - sz >= frames) return true;
+
+            if (timeout == std::chrono::milliseconds::max()) {
+                spaceReady.acquire();
+            } else {
+                const auto now = std::chrono::steady_clock::now();
+                if (now >= deadline) return false;
+                if (!spaceReady.try_acquire_for(deadline - now)) return true;
+            }
+        }
     }
 
-    // Блокирующее чтение – ждёт, пока в буфере не накопится как минимум frames фреймов,
-    // затем читает ровно frames (или меньше, если за время ожидания произошла перезапись).
-    // Возвращает количество реально прочитанных фреймов (обычно frames).
-    // Если таймаут истёк – возвращает 0 (ничего не читает).
-    size_t readBlocking(float* dst, size_t frames, std::chrono::milliseconds timeout = std::chrono::milliseconds::max()) {
+    // ============================================================
+    //  БЛОКИРУЮЩЕЕ ЧТЕНИЕ (writeData из recordBuffer)
+    // ============================================================
+    size_t readBlocking(float* dst, size_t frames,
+                        std::chrono::milliseconds timeout = std::chrono::milliseconds(100)) {
         if (frames == 0) return 0;
 
-        std::unique_lock<std::mutex> lock(mutex);
-        bool ready = false;
-        if (timeout == std::chrono::milliseconds::max()) {
-            cv.wait(lock, [this, frames] { return count >= frames; });
-            ready = true;
-        } else {
-            ready = cv.wait_for(lock, timeout, [this, frames] { return count >= frames; });
+        auto deadline = std::chrono::steady_clock::now() + timeout;
+
+        while (true) {
+            if (queue.size_approx() >= frames) break;
+
+            if (timeout == std::chrono::milliseconds::max()) {
+                dataReady.acquire();
+            } else {
+                const auto now = std::chrono::steady_clock::now();
+                if (now >= deadline) return 0;
+                if (!dataReady.try_acquire_for(deadline - now)) return 0;
+            }
         }
 
-        if (!ready) {
-            return 0;
-        }
-
-        // После пробуждения у нас уже захвачен мьютекс
-        size_t r = read_idx;
-        size_t to_read = (frames < count) ? frames : count; // может быть меньше из-за перезаписи
-        read_idx = (r + to_read) % capacity;
-        count -= to_read;
-        lock.unlock();
-
-        // Копируем данные
-        size_t first_part = capacity - r;
-        size_t copy = (to_read < first_part) ? to_read : first_part;
-        memcpy(dst, buffer.get() + r, copy * sizeof(float));
-        if (to_read > copy) {
-            memcpy(dst + copy, buffer.get(), (to_read - copy) * sizeof(float));
-        }
-
-        return to_read;
+        // size >= frames => read вернёт ровно frames
+        return read(dst, frames);
     }
 
-    // Получить текущее количество доступных фреймов (без блокировки – но с мьютексом)
-    size_t available() const {
-        std::lock_guard<std::mutex> lock(mutex);
-        return count;
+    // ============================================================
+    //  ВСПОМОГАТЕЛЬНОЕ
+    // ============================================================
+    size_t available() const noexcept {
+        const size_t sz = queue.size_approx();
+        return (sz > capacity) ? capacity : sz;
+    }
+
+    size_t freeSpace() const noexcept { return capacity - available(); }
+    size_t getCapacity() const noexcept { return capacity; }
+
+    // Разбудить всех, кто ждёт (при остановке)
+    void notifyAll() {
+        dataReady.release();
+        spaceReady.release();
+    }
+
+    // Очистить буфер (можно звать из не-RT контекста)
+    void reset() {
+        float dummy;
+        while (queue.try_dequeue(dummy)) {}
+        // Бинарные семафоры сбрасывать не нужно — «лишний» токен
+        // просто заставит ожидающего проснуться и перечитать size_approx().
     }
 
 private:
     const size_t capacity;
-    std::unique_ptr<float[]> buffer;
-    size_t read_idx = 0;
-    size_t write_idx = 0;
-    size_t count = 0;
+    moodycamel::ReaderWriterQueue<float> queue;
 
-    mutable std::mutex mutex;
-    std::condition_variable cv;
+    // Бинарные семафоры: не накапливают счётчики, только «есть событие/нет».
+    // Актуальное состояние всегда проверяется через size_approx().
+    std::binary_semaphore dataReady {0};
+    std::binary_semaphore spaceReady{0};
 };

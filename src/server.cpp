@@ -243,9 +243,7 @@
                 {
                     std::lock_guard m(delAndAt);
                     if(sessions.count(clientHash)) {
-                        try{
-                            sessions.at(clientHash).get()->processIncoming(buf, n);
-                        } catch(const std::out_of_range& e) {}
+                        sessions.at(clientHash).get()->processIncoming(buf, n);
                         //std::cout << clientHash << "a" << std::endl;
                     } else {
                         sessions.insert({clientHash, std::make_unique<SessionData>(clientHash, cfg.server_fd, cfg.ctx, client_addr, usersInChannels, sessions, sessionsHash)});

@@ -57,6 +57,15 @@ void error_handling(const char *msg) {
     //exit(EXIT_FAILURE);
 }
 
+uint32_t fnv1a_32(const char* data, size_t size) {
+    uint32_t hash = 0x811C9DC5; // FNV offset basis
+    for (size_t i = 0; i < size; ++i) {
+        hash ^= static_cast<uint8_t>(data[i]);
+        hash *= 0x01000193; // FNV prime
+    }
+    return hash;
+}
+
 //ниже дефайны для cmd
 
 #define CONNECT 0//команда которая означает подключение к серверу
@@ -65,6 +74,7 @@ void error_handling(const char *msg) {
 
 struct networkDataAudio {
     char cmd;
+    uint32_t sequence;
     //int sizeFrames;
     char username[33];
     char password[8];

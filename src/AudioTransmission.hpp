@@ -5,15 +5,70 @@
 #include <chrono>
 #include <optional>
 #include <opus.h>
+#include "audio.hpp"
+#include <queue>
+#include "Spinlock.hpp"
+#include "ThreadRealTime.hpp"
+#include "jitterbuffer.hpp"
+#include <math.h>
 
-/*
-    #ifdef _WIN32
-        closesocket(sock);
-        WSACleanup();
-    #else
-        close(sock);
-    #endif
-*/
+class ClientIdMap {
+public:
+    // Возвращает стабильный id 0..63 для данного хеша или UINT32_MAX при переполнении
+    uint32_t Get(uint32_t hash, int MAX_CLIENTS=64) {
+        auto it = map_.find(hash);
+        if (it != map_.end()) return it->second;
+        if (nextId_ >= MAX_CLIENTS) return UINT32_MAX;
+        uint32_t id = nextId_++;
+        map_[hash] = id;
+        return id;
+    }
+private:
+    std::unordered_map<uint32_t, uint32_t> map_;
+    uint32_t nextId_ = 0;
+};
+
+
+static inline float fastTanh(float x) noexcept {
+    // Saturate, чтобы не уходить в бесконечность
+    if (x < -3.0f) return -1.0f;
+    if (x >  3.0f) return  1.0f;
+
+    const float x2 = x * x;
+    // Padé(3,3) для tanh:
+    //   tanh(x) ≈ x * (27 + x²) / (27 + 9·x²)
+    return x * (27.0f + x2) / (27.0f + 9.0f * x2);
+}
+
+class User {
+public:
+    User(ClientIdMap& idMap_, const uint32_t& clientHash_, const char* username_) : idMap(idMap_), clientHash(clientHash_), username(username_) {
+        mixerHash = idMap.Get(clientHash);
+        std::cout << "подключился: " << username;
+        decoder = opus_decoder_create(SAMPLE_RATE, 1, &error);
+        if (error != OPUS_OK) {
+            std::cerr << "Ошибка создания декодера: " << opus_strerror(error) << std::endl;
+        }
+    }
+    ~User() {}
+    uint32_t getClientHash() {
+        return clientHash;
+    }
+    uint32_t getMixerHash() {
+        return mixerHash;
+    }
+    OpusDecoder* getOpusDecoder() {
+        return decoder;
+    }
+private:
+    ClientIdMap& idMap;
+    const uint32_t clientHash;
+    uint32_t mixerHash;
+    std::string username;
+    OpusDecoder* decoder;
+    int error;
+
+};
 
 class AudioTransmission {
     private:
@@ -27,15 +82,14 @@ class AudioTransmission {
         LockFreeRingBuffer& recordBuffer;
 
         WOLFSSL_CTX* ctx;
-        //std::optional<WOLFSSL*> ssl;
         WOLFSSL* ssl;
 
         std::thread write;
         std::thread read;
         std::thread controlthread;
 
-        std::atomic<bool> running;
-        std::atomic<bool> statusReadData, statusWriteData;
+        std::atomic<bool> running = false;
+        std::atomic<bool> stopFlag = false;
 
         OpusEncoder* encoder;
         OpusDecoder* decoder;
@@ -43,59 +97,99 @@ class AudioTransmission {
         std::string username;
 
         int numchannel;
+
+        JitterBufferManager<float, FRAME_SIZE, 64> jitter{3, 10};
+
+        
         
 
         int error = 0;
 
+        int mixer() noexcept {
+            auto Buf = std::make_unique<float[]>(FRAME_SIZE);
+
+            while (running) {
+                if (!readBuffer.waitForSpace(FRAME_SIZE, &stopFlag)) {
+                    if (stopFlag.load()) break;
+                    continue;
+                }
+
+                float* dst = Buf.get();
+                std::fill(dst, dst + FRAME_SIZE, 0.0f);
+
+                size_t mixed = jitter.MixInto(dst, FRAME_SIZE);
+                if (mixed) {
+                    float inv = 0.95f;
+                    for (size_t i = 0; i < FRAME_SIZE; ++i)
+                        dst[i] = fastTanh(dst[i]);
+                }
+
+                readBuffer.writeNoOverwrite(dst, FRAME_SIZE);
+            }
+            return 0;
+        }
+
         int readData() {
+            ClientIdMap idMap;
             std::unique_ptr<float[]> tempPCMData;
-            tempPCMData = std::make_unique<float[]>(FRAME_SIZE);
-            statusReadData = true;
+            JitterBufferManager<float, FRAME_SIZE, 64>::Frame frame;
+            int bytes;
+            int decoded;
+            uint32_t clientHash;
+            std::unordered_map<uint32_t, std::unique_ptr<User>> users;
+            //q.reserve(50);
+            User* userptr;
+            
 
             while(running) {
-                int bytes = wolfSSL_read(ssl, receive.get(), sizeof(networkDataAudio));
-                if (bytes > 0) {
-                    int decodedSamplesPerChannel = opus_decode_float(decoder, receive.get()->frames, 160, tempPCMData.get(), FRAME_SIZE, 0);
-                    readBuffer.write(tempPCMData.get(), decodedSamplesPerChannel);
-                } else {
-                    fprintf(stderr, "wolfSSL_read error or connection closed\n");
-                    break;
+                bytes = wolfSSL_read(ssl, receive.get(), sizeof(networkDataAudio));
+
+                if (bytes == (int)sizeof(networkDataAudio)) {
+                    clientHash = fnv1a_32(receive->username, 32);
+                    if (!users.count(clientHash)) {
+                        users.insert({clientHash, std::make_unique<User>(idMap,clientHash, receive->username)});
+                    }
+                    userptr = users[clientHash].get();
+                    decoded = opus_decode_float(userptr->getOpusDecoder(), receive->frames, 160, frame.data(), FRAME_SIZE, 0);
+                    if (decoded == (int)FRAME_SIZE) {
+                        jitter.PushPacket(userptr->getMixerHash(), receive->sequence, frame);
+                    }
+                } else if (bytes < 0) {
+                    fprintf(stderr, "wolfSSL_read error\n");
+                    //break;
                 }
-                //std::cout << "readData" << std::endl;
+                
             }
-            statusReadData = false;
             //delete dataForReceive;
             return 0;
         }
 
         int writeData() {
-            statusWriteData = true;
-            //networkDataAudio* dataForSend = new networkDataAudio;
-            std::unique_ptr<float[]> tempPCMData;
-            tempPCMData = std::make_unique<float[]>(FRAME_SIZE);
-            send.get()->channel = numchannel;
+            uint32_t sendSeq_ = 0;
+            auto tempPCMData = std::make_unique<float[]>(FRAME_SIZE);
 
-            strcpy(send.get()->username, username.c_str());
+            send->channel = numchannel;
+            strncpy(send->username, username.c_str(), sizeof(send->username) - 1);
+            send->username[sizeof(send->username) - 1] = '\0';
+
             int n;
 
-            while(running) {
+            while (running) {
                 n = recordBuffer.readBlocking(tempPCMData.get(), FRAME_SIZE);
+                if (n != (int)FRAME_SIZE) continue;
 
-                if (n == FRAME_SIZE) {
-                    n = opus_encode_float(encoder,tempPCMData.get(),FRAME_SIZE, send.get()->frames, 160);
-                    //std::cout << send.get()->frames[0] << std::endl;
-                    if (wolfSSL_write(ssl, send.get(), sizeof(networkDataAudio)) != (int)sizeof(networkDataAudio)) {
-                        fprintf(stderr, "wolfSSL_write failed\n");
-                        //break;
-                    } else {
-                        //printf("Sent: output networkDataAudio");
-                    }
-                    //std::cout << "writeData" << std::endl;
+                int encoded = opus_encode_float(encoder,
+                                                tempPCMData.get(), FRAME_SIZE,
+                                                send->frames, 160);
+                if (encoded < 0) continue;
+
+                send->sequence = sendSeq_++;   // ← инкремент после успешного encode
+
+                if (wolfSSL_write(ssl, send.get(), sizeof(networkDataAudio))
+                        != (int)sizeof(networkDataAudio)) {
+                    fprintf(stderr, "wolfSSL_write failed\n");
                 }
-                    
             }
-            statusWriteData = false;
-            //delete dataForSend;
             return 0;
         }
 
@@ -107,15 +201,6 @@ class AudioTransmission {
 
             wolfSSL_dtls_set_peer(ssl, (struct sockaddr*)&server_addr, sizeof(server_addr));
             wolfSSL_dtls_set_mtu(ssl, MTU);
-            
-            //if (wolfSSL_dtls_cid_use(ssl) != WOLFSSL_SUCCESS) {
-            //    fprintf(stderr, "wolfSSL_dtls_cid_use failed\n");
-            //}
-            // 4. Устанавливаем желаемый CID (предлагаем серверу)
-            //if (wolfSSL_dtls_cid_set(ssl, cid, CID_LEN) != WOLFSSL_SUCCESS) {
-            //    fprintf(stderr, "wolfSSL_dtls_cid_set failed\n");
-            //}
-
 
             while(wolfSSL_connect(ssl) != SSL_SUCCESS) {
                 fprintf(stderr, "wolfSSL_connect failed\n");
@@ -130,11 +215,20 @@ class AudioTransmission {
             running = true;
             write = std::thread(&AudioTransmission::writeData, this);
             read = std::thread(&AudioTransmission::readData, this);
+            ThreadRealTime mixer_(80, &AudioTransmission::mixer,     this);
             write.detach();
             read.detach();
+            mixer_.detach();
 
             while(running) {std::this_thread::sleep_for(std::chrono::milliseconds(1));}
-            while(statusReadData || statusWriteData) {}
+            //while(statusReadData || statusWriteData) {}
+        }
+
+        void setClientVolume(uint32_t clientId, float gain) {
+            jitter.SetClientGain(clientId, gain);
+        }
+        float clientVolume(uint32_t clientId) const {
+            return jitter.GetClientGain(clientId);
         }
 
     public:
@@ -202,7 +296,7 @@ class AudioTransmission {
         void stopTransmission() {
             if (running) {
                 running = false;
-                while(statusReadData || statusWriteData) {}
+                //while(statusReadData || statusWriteData) {}
                 wolfSSL_free(ssl);
             }
         }

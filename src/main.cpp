@@ -74,7 +74,7 @@ extern "C" long data_dinamic(cubeb_stream * stm, void * user,
              const void * input_buffer,  // Данные с микрофона
              void * output_buffer,       // Буфер для заполнения (динамики)
              long nframes) {             // Количество кадров для обработки
-
+    //std::cout << nframes << std::endl;
     LockFreeRingBuffer* recordBuffer = (LockFreeRingBuffer*)user;
     float* out = static_cast<float*>(output_buffer);
     int channels = 1; 

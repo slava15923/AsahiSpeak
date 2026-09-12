@@ -142,21 +142,63 @@ public:
     }
 };
 
-/**
- * Добавляет моно-буфер src к моно-буферу dst с накоплением:
- * dst[i] = dst[i] + src[i] * gain, с клиппингом в [-1.0, 1.0]
- * 
- * @param dst          Выходной буфер (читается и перезаписывается)
- * @param src          Входной буфер (прибавляется к dst)
- * @param num_samples  Количество сэмплов (для 20мс/48кГц = 960)
- * @param gain         Коэффициент усиления для src (рекомендую 1.0/N)
- */
-void mix_add_mono(float *dst, const float *src, size_t num_samples, float gain) {
-    for (size_t i = 0; i < num_samples; ++i) {
-        float val = dst[i] + src[i] * gain;
-        // Защита от переполнения (жёсткий клиппинг)
-        if (val > 1.0f) val = 1.0f;
-        else if (val < -1.0f) val = -1.0f;
-        dst[i] = val;
-    }
+class DoubleBuffer {
+public:
+    explicit DoubleBuffer(size_t size);
+    ~DoubleBuffer() = default;
+
+    // Получить указатель на текущий активный буфер для записи (без блокировки)
+    float* getWriteBuffer() noexcept;
+
+    // Переключить буферы: возвращает указатель на старый активный (с данными),
+    // активным становится бывший свободный (обнулённый). Вызывается под мьютексом.
+    float* swap();
+
+    // Вернуть буфер в пул свободных (после обнуления). Вызывается под мьютексом.
+    void releaseBuffer(float* buffer);
+
+    // Обнулить оба буфера (для инициализации)
+    void clear();
+
+private:
+    std::unique_ptr<float[]> bufA;
+    std::unique_ptr<float[]> bufB;
+    std::atomic<float*> active;   // текущий буфер для записи
+    float* free;                  // свободный буфер (обнулён, защищён мьютексом)
+    std::mutex mtx;               // защищает переключение и возврат
+    size_t size;
+};
+
+DoubleBuffer::DoubleBuffer(size_t size) : size(size) {
+    bufA = std::make_unique<float[]>(size);
+    bufB = std::make_unique<float[]>(size);
+    clear();
+    active = bufA.get();
+    free = bufB.get();
+}
+
+float* DoubleBuffer::getWriteBuffer() noexcept {
+    return active.load(std::memory_order_acquire);
+}
+
+float* DoubleBuffer::swap() {
+    std::lock_guard<std::mutex> lock(mtx);
+    float* oldActive = active.load(std::memory_order_relaxed);
+    // Меняем местами: активным становится свободный, свободным – старый активный
+    active.store(free, std::memory_order_release);
+    free = oldActive;
+    // Теперь free указывает на старый активный (который нужно обнулить после использования)
+    // Возвращаем oldActive для записи в readBuffer
+    return oldActive;
+}
+
+void DoubleBuffer::releaseBuffer(float* buffer) {
+    std::lock_guard<std::mutex> lock(mtx);
+    // Предполагается, что buffer уже обнулён вызывающим
+    free = buffer;
+}
+
+void DoubleBuffer::clear() {
+    std::fill(bufA.get(), bufA.get() + size, 0.0f);
+    std::fill(bufB.get(), bufB.get() + size, 0.0f);
 }

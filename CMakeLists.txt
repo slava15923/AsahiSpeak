@@ -14,6 +14,13 @@ if (MINGW)
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -static-libgcc -static-libstdc++")
 endif()
 
+if (NOT WIN32)
+    set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -fuse-ld=mold")
+    set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} -fuse-ld=mold")
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O3 -march=native -ffast-math")
+endif()
+
+
 
 add_compile_definitions(WOLFSSL_DTLS_MTU WOLFSSL_DTLS WOLFSSL_DTLS_CID)
 
@@ -33,9 +40,8 @@ add_subdirectory(opus-1.5.2)
 add_subdirectory(ReNameNoise)
 add_subdirectory(CLI11)
 
-add_compile_options(-O3)
 
-set(CMAKE_BUILD_TYPE Debug)
+#set(CMAKE_BUILD_TYPE Debug)
 
 add_executable(AsahiSpeak src/main.cpp)
 
@@ -58,6 +64,7 @@ target_include_directories(AsahiSpeak PUBLIC
     ${PROJECT_SOURCE_DIR}/opus-1.5.2/include
     ${PROJECT_SOURCE_DIR}/ReNameNoise/include
     ${PROJECT_SOURCE_DIR}/CLI11/include/CLI
+    ${PROJECT_SOURCE_DIR}/readerwriterqueue
 )
 
 if(NOT WIN32)
