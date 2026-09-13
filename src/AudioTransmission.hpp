@@ -118,6 +118,7 @@ class AudioTransmission {
         std::vector<uint64_t> indexBuffers;
         std::unordered_map<uint32_t, std::unique_ptr<User>> users;
         ClientIdMap idMap;
+        std::mutex mixerMtx;
 
         
         
@@ -138,14 +139,18 @@ class AudioTransmission {
                 std::fill(dst, dst + FRAME_SIZE, 0.0f);
                 std::shared_ptr<float[]> temp;
 
-                for(const auto& index : indexBuffers) {
-                    if(buffers[index].get()->pop(temp)) {
-                        for(int i = 0; i < FRAME_SIZE; i++) {
-                            dst[i] += temp.get()[i];
+                {
+                    std::lock_guard<std::mutex> lock(mixerMtx);
+                    for(const auto& index : indexBuffers) {
+                        if(buffers[index].get()->pop(temp)) {
+                            for(int i = 0; i < FRAME_SIZE; i++) {
+                                dst[i] += temp.get()[i];
+                            }
+                            mixed++;
                         }
-                        mixed++;
                     }
                 }
+                
 
                 if (mixed) {
                     float inv = 0.95f;
@@ -177,15 +182,21 @@ class AudioTransmission {
                     clientHash = fnv1a_32(receive->username, strlen(receive->username));
                     if (!users.count(clientHash)) {
                         users.emplace(clientHash, std::make_unique<User>(idMap,clientHash, receive->username));
-                        buffers.emplace(clientHash, std::make_shared<JitterBuffer<std::shared_ptr<float[]>>>(receive->sequence));
-                        indexBuffers.push_back(clientHash);
+                        {
+                            std::lock_guard<std::mutex> lock(mixerMtx);
+                            buffers.emplace(clientHash, std::make_shared<JitterBuffer<std::shared_ptr<float[]>>>(receive->sequence));
+                            indexBuffers.push_back(clientHash);
+                        }
                         //printf("new user\n");
                     }
                     frame = std::make_shared<float[]>(FRAME_SIZE);
                     userptr = users[clientHash].get();
                     decoded = opus_decode_float(userptr->getOpusDecoder(), receive->frames, 160, frame.get(), FRAME_SIZE, 0);
                     if (decoded == (int)FRAME_SIZE) {
-                        buffers[clientHash].get()->push(receive->sequence, frame);
+                        {
+                            std::lock_guard<std::mutex> lock(mixerMtx);
+                            buffers[clientHash].get()->push(receive->sequence, frame);
+                        }
                     }
                 } else if (bytes < 0) {
                     fprintf(stderr, "wolfSSL_read error\n");
