@@ -114,7 +114,8 @@ class AudioTransmission {
 
         int numchannel;
 
-        JitterBufferManager<float, FRAME_SIZE, 64> jitter{3, 10};
+        std::unordered_map<uint32_t, std::shared_ptr<JitterBuffer<std::shared_ptr<float[]> > > > buffers;
+        std::vector<uint64_t> indexBuffers;
         std::unordered_map<uint32_t, std::unique_ptr<User>> users;
         ClientIdMap idMap;
 
@@ -125,6 +126,7 @@ class AudioTransmission {
 
         int mixer() noexcept {
             auto Buf = std::make_unique<float[]>(FRAME_SIZE);
+            int mixed = 0;
 
             while (running) {
                 if (!readBuffer.waitForSpace(FRAME_SIZE, &stopFlag)) {
@@ -134,8 +136,17 @@ class AudioTransmission {
 
                 float* dst = Buf.get();
                 std::fill(dst, dst + FRAME_SIZE, 0.0f);
+                std::shared_ptr<float[]> temp;
 
-                size_t mixed = jitter.MixInto(dst, FRAME_SIZE);
+                for(const auto& index : indexBuffers) {
+                    if(buffers[index].get()->pop(temp)) {
+                        for(int i = 0; i < FRAME_SIZE; i++) {
+                            dst[i] += temp.get()[i];
+                        }
+                        mixed++;
+                    }
+                }
+
                 if (mixed) {
                     float inv = 0.95f;
                     for (size_t i = 0; i < FRAME_SIZE; ++i)
@@ -143,13 +154,14 @@ class AudioTransmission {
                 }
 
                 readBuffer.writeNoOverwrite(dst, FRAME_SIZE);
+
+                mixed = 0;
             }
             return 0;
         }
 
         int readData() {
-            std::unique_ptr<float[]> tempPCMData;
-            JitterBufferManager<float, FRAME_SIZE, 64>::Frame frame;
+            std::shared_ptr<float[]> frame;
             int bytes;
             int decoded;
             uint32_t clientHash;
@@ -164,13 +176,16 @@ class AudioTransmission {
                 if (bytes == (int)sizeof(networkDataAudio)) {
                     clientHash = fnv1a_32(receive->username, strlen(receive->username));
                     if (!users.count(clientHash)) {
-                        users.insert({clientHash, std::make_unique<User>(idMap,clientHash, receive->username)});
+                        users.emplace(clientHash, std::make_unique<User>(idMap,clientHash, receive->username));
+                        buffers.emplace(clientHash, std::make_shared<JitterBuffer<std::shared_ptr<float[]>>>(receive->sequence));
+                        indexBuffers.push_back(clientHash);
                         //printf("new user\n");
                     }
+                    frame = std::make_shared<float[]>(FRAME_SIZE);
                     userptr = users[clientHash].get();
-                    decoded = opus_decode_float(userptr->getOpusDecoder(), receive->frames, 160, frame.data(), FRAME_SIZE, 0);
+                    decoded = opus_decode_float(userptr->getOpusDecoder(), receive->frames, 160, frame.get(), FRAME_SIZE, 0);
                     if (decoded == (int)FRAME_SIZE) {
-                        jitter.PushPacket(userptr->getMixerHash(), receive->sequence, frame);
+                        buffers[clientHash].get()->push(receive->sequence, frame);
                     }
                 } else if (bytes < 0) {
                     fprintf(stderr, "wolfSSL_read error\n");
@@ -233,7 +248,8 @@ class AudioTransmission {
             running = true;
             write = std::thread(&AudioTransmission::writeData, this);
             read = std::thread(&AudioTransmission::readData, this);
-            ThreadRealTime mixer_(80, &AudioTransmission::mixer,     this);
+            //ThreadRealTime mixer_(80, &AudioTransmission::mixer, this);
+            std::thread mixer_(&AudioTransmission::mixer, this);
             write.detach();
             read.detach();
             mixer_.detach();
@@ -243,10 +259,10 @@ class AudioTransmission {
         }
 
         void setClientVolume(uint32_t clientId, float gain) {
-            jitter.SetClientGain(clientId, gain);
+        //    jitter.SetClientGain(clientId, gain);
         }
         float clientVolume(uint32_t clientId) const {
-            return jitter.GetClientGain(clientId);
+        //    return jitter.GetClientGain(clientId);
         }
 
     public:
