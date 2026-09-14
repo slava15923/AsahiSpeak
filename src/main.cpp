@@ -38,11 +38,10 @@ extern "C" void state_cb(cubeb_stream *stream, void *user_ptr, cubeb_state state
 }
 
 
-/*НЕ РАБОТАЕТ!!! функцию написала ии*/
 extern "C" long data_fullduplex(cubeb_stream * stm, void * user,
-             const void * input_buffer,  // Данные с микрофона
-             void * output_buffer,       // Буфер для заполнения (динамики)
-             long nframes) {             // Количество кадров для обработки
+             const void * input_buffer,
+             void * output_buffer,
+             long nframes) {
 
     const float * in = (const float*)input_buffer;
     float * out = (float*)output_buffer;
@@ -55,18 +54,22 @@ extern "C" long data_fullduplex(cubeb_stream * stm, void * user,
     return nframes;
 }
 
-/*функция для работы с МОНО микрофоном в cubeb*/
+
 extern "C" long data_micro(cubeb_stream * stm, void * user,
-             const void * input_buffer,  // Данные с микрофона
-             void * output_buffer,       // Буфер для заполнения (динамики)
-             long nframes) {             // Количество кадров для обработки
+             const void * input_buffer,
+             void * output_buffer,
+             long nframes) {
     //std::cout << nframes << std::endl;
     LockFreeRingBuffer* recordBuffer = (LockFreeRingBuffer*)user;
 
     const float* in = static_cast<const float*>(input_buffer);
-    recordBuffer->write(in, nframes);
+    if(isMuted.test()) {
+        recordBuffer->write(noSound, nframes);
+    } else {
+        recordBuffer->write(in, nframes);
+    }
     //std::cout << "writeDataMicro" << nframes << std::endl;
-    return nframes; // Возвращаем количество обработанных кадров
+    return nframes;
 }
 
 /*функция для работы с МОНО динамиками в cubeb*/

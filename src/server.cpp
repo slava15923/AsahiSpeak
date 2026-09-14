@@ -99,7 +99,6 @@
             if (wolfSSL_inject(ssl, data_, sz) != WOLFSSL_SUCCESS) {
                 return false;
             }
-            updateLastUsed();
 
             if (!handshake_done) {
                 int ret = wolfSSL_accept(ssl);
@@ -116,6 +115,7 @@
                     }
                     return true;
                 }
+                updateLastUsed();
             }
 
             
@@ -134,6 +134,7 @@
                     for(auto& user : usersInChannels[channel]) {
                         if(user != clientHash) {
                             //user.get()->send(buf, ret);
+                            data->clientHash = clientHash;
                             users[user].get()->send(buf,ret);
                         }
                     }

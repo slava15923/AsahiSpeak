@@ -12,6 +12,9 @@
 #include "jitterbuffer.hpp"
 #include <math.h>
 
+std::atomic_flag isMuted;
+float noSound[FRAME_SIZE] = {0};
+
 class ClientIdMap {
 public:
     uint32_t Get(uint32_t hash, int MAX_CLIENTS = 64) {
@@ -119,6 +122,7 @@ class AudioTransmission {
         std::unordered_map<uint32_t, std::unique_ptr<User>> users;
         ClientIdMap idMap;
         std::mutex mixerMtx;
+        
 
         
         
@@ -169,7 +173,7 @@ class AudioTransmission {
             std::shared_ptr<float[]> frame;
             int bytes;
             int decoded;
-            uint32_t clientHash;
+            uint64_t clientHash;
             //q.reserve(50);
             User* userptr;
             
@@ -179,7 +183,7 @@ class AudioTransmission {
                 bytes = wolfSSL_read(ssl, receive.get(), sizeof(networkDataAudio));
 
                 if (bytes == (int)sizeof(networkDataAudio)) {
-                    clientHash = fnv1a_32(receive->username, strlen(receive->username));
+                    clientHash = receive.get()->clientHash;
                     if (!users.count(clientHash)) {
                         users.emplace(clientHash, std::make_unique<User>(idMap,clientHash, receive->username));
                         {
@@ -195,7 +199,7 @@ class AudioTransmission {
                     if (decoded == (int)FRAME_SIZE) {
                         {
                             std::lock_guard<std::mutex> lock(mixerMtx);
-                            buffers[clientHash].get()->push(receive->sequence, frame);
+                            buffers[clientHash].get()->push(receive->sequence, std::move(frame));
                         }
                     }
                 } else if (bytes < 0) {
@@ -227,7 +231,7 @@ class AudioTransmission {
                                                 send->frames, 160);
                 if (encoded < 0) continue;
 
-                send->sequence = sendSeq_++;   // ← инкремент после успешного encode
+                send->sequence = sendSeq_++;
 
                 if (wolfSSL_write(ssl, send.get(), sizeof(networkDataAudio))
                         != (int)sizeof(networkDataAudio)) {
@@ -357,5 +361,12 @@ class AudioTransmission {
         
         void offCertVerify() {
             wolfSSL_CTX_set_verify(ctx, SSL_VERIFY_NONE, 0);
+        }
+
+        void mute() {
+            isMuted.test_and_set();
+        }
+        void unmute() {
+            isMuted.clear();
         }
 };

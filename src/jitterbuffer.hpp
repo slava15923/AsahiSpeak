@@ -32,7 +32,12 @@ public:
         if(!primed) return false;
         
         auto it = buffer.find(sequence);
-        if (it == buffer.end()) return false;
+
+        if (it == buffer.end()) {
+            ++sequence;
+            return false;
+        }
+        
         data = std::move(it->second);
         buffer.erase(it);
         ++sequence;

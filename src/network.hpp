@@ -74,10 +74,10 @@ uint32_t fnv1a_32(const char* data, size_t size) {
 
 struct networkDataAudio {
     char cmd;
+    uint64_t clientHash;
     uint32_t sequence;
-    //int sizeFrames;
     char username[33];
-    char password[8];
+    char password[32];
     unsigned char channel;
     unsigned char frames[160];
 };
