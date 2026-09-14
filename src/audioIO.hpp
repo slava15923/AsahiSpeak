@@ -18,15 +18,12 @@ public:
             in_scaled[i] = input[i] * PCM_SCALE;
         }
         renamenoise_process_frame(state_.get(), output, in_scaled);
-        // Выходной буфер теперь содержит значения в диапазоне [-32768, 32767]
-        // Если нужно вернуть [-1, 1], поделите:
         for (size_t i = 0; i < FRAME_SIZE_; ++i) {
             output[i] /= PCM_SCALE;
         }
     }
 
 private:
-    // 使用智能指针管理资源
     unsigned int PCM_SCALE = 32768;
     int FRAME_SIZE_ = 480;
     std::unique_ptr<ReNameNoiseDenoiseState, decltype(&renamenoise_destroy)> state_;
@@ -57,11 +54,10 @@ class audioInput {
             const float* in = static_cast<const float*>(input_buffer);
             recordBuffer->write(in, nframes);
             //std::cout << "writeDataMicro" << nframes << std::endl;
-            return nframes; // Возвращаем количество обработанных кадров
+            return nframes;
         }
         static void state_cb(cubeb_stream *stream, void *user_ptr, cubeb_state state) {
-            printf("Состояние потока изменилось: %d\n", state);
-            //return CUBEB_OK;
+            printf("change cubeb thread: %d\n", state);
         }
 
         void audio_processing_worker_thread() {
@@ -108,7 +104,6 @@ class audioInput {
         ~audioInput() {
             stop();
             cubeb_stream_destroy(stm);
-            //renamenoise_destroy(st);
         }
 };
 
@@ -143,7 +138,7 @@ class audioOut {
         }
 
         static void state_cb(cubeb_stream *stream, void *user_ptr, cubeb_state state) {
-            printf("Состояние потока изменилось: %d\n", state);
+            printf("change cubeb thread: %d\n", state);
             //return CUBEB_OK;
         }
 
@@ -161,7 +156,6 @@ class audioOut {
                 data_dinamic, state_cb, &buffer);
 
             if (err != CUBEB_OK) {
-                // Например, выбросить исключение
                 throw std::runtime_error("cubeb_stream_init failed");
             }
         }

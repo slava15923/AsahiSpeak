@@ -20,7 +20,11 @@ public:
     void push(const uint64_t sequence_, T data) {
         std::lock_guard<std::mutex> lock(mutex);
         if (sequence > sequence_) return;
-        if(buffer.size() >= maxSize) return;
+        if(buffer.size() >= maxSize){ 
+            buffer.erase(buffer.begin()); 
+            buffer.try_emplace(sequence_, std::move(data));
+            return;
+        }
         buffer.try_emplace(sequence_, std::move(data));
         if(buffer.size() >= minimalSize) primed = true;
     }
@@ -29,15 +33,12 @@ public:
         std::lock_guard<std::mutex> lock(mutex);
 
         if (buffer.empty()) { primed = false; return false; }
-        if(!primed) return false;
-        
-        auto it = buffer.find(sequence);
+        if (!primed) return false;
 
-        if (it == buffer.end()) {
-            ++sequence;
-            return false;
-        }
-        
+        auto it = buffer.begin();
+
+        sequence = it->first;
+
         data = std::move(it->second);
         buffer.erase(it);
         ++sequence;

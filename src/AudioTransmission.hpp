@@ -63,10 +63,10 @@ class User {
 public:
     User(ClientIdMap& idMap_, const uint32_t& clientHash_, const char* username_) : idMap(idMap_), clientHash(clientHash_), username(username_) {
         mixerHash = idMap.Get(clientHash);
-        std::cout << "подключился: " << username << std::endl;
+        std::cout << "connect: " << username << std::endl;
         decoder = opus_decoder_create(SAMPLE_RATE, 1, &error);
         if (error != OPUS_OK) {
-            std::cerr << "Ошибка создания декодера: " << opus_strerror(error) << std::endl;
+            std::cerr << "error create decoder: " << opus_strerror(error) << std::endl;
         }
     }
     ~User() {}
@@ -132,6 +132,7 @@ class AudioTransmission {
         int mixer() noexcept {
             auto Buf = std::make_unique<float[]>(FRAME_SIZE);
             int mixed = 0;
+            std::vector<std::shared_ptr<float[]>> localBuffer;
 
             while (running) {
                 if (!readBuffer.waitForSpace(FRAME_SIZE, &stopFlag)) {
@@ -142,6 +143,7 @@ class AudioTransmission {
                 float* dst = Buf.get();
                 std::fill(dst, dst + FRAME_SIZE, 0.0f);
                 std::shared_ptr<float[]> temp;
+                
 
                 {
                     std::lock_guard<std::mutex> lock(mixerMtx);

@@ -134,9 +134,9 @@ int main(int argc, char* argv[]) {
     std::cout << cubeb_get_preferred_sample_rate(app_ctx, &rate) << std::endl;
 
     cubeb_stream_params params;
-    params.format = CUBEB_SAMPLE_FLOAT32NE; // или CUBEB_SAMPLE_S16LE
-    params.rate = SAMPLE_RATE;                   // ваша частота дискретизации
-    params.channels = 1;                   // количество каналов
+    params.format = CUBEB_SAMPLE_FLOAT32NE;
+    params.rate = SAMPLE_RATE;
+    params.channels = 1;
     params.layout = CUBEB_LAYOUT_UNDEFINED;
     params.prefs = CUBEB_STREAM_PREF_NONE;
     std::cout << cubeb_get_min_latency(app_ctx, &params, &latency_frames) << std::endl;
