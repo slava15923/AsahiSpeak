@@ -3,6 +3,8 @@ project(AsahiSpeak)
 
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
+option(ASAHI_NO_COMPILE_CLIENT "Enable custom cryptography mode" OFF)
+
 if (MINGW)
     # Принудительно собираем все библиотеки как статические
     set(BUILD_SHARED_LIBS OFF CACHE BOOL "Build static libraries only" FORCE)
@@ -62,38 +64,38 @@ set(CLI11_BUILD_TESTS OFF CACHE BOOL "Disable CLI11 tests")
 
 set(BUILD_TESTS OFF CACHE BOOL "Disable cubeb tests" FORCE)
 
-add_subdirectory(cubeb)
-add_subdirectory(wolfssl-5.9.2-stable)
-add_subdirectory(opus-1.5.2)
-add_subdirectory(ReNameNoise)
-add_subdirectory(CLI11)
 
+add_subdirectory(wolfssl-5.9.2-stable)
 
 #set(CMAKE_BUILD_TYPE Debug)
+if(NOT ASAHI_NO_COMPILE_CLIENT)
+    add_subdirectory(opus-1.5.2)
+    add_subdirectory(ReNameNoise)
+    add_subdirectory(CLI11)
+    add_subdirectory(cubeb)
+    add_executable(AsahiSpeak src/main.cpp)
 
-add_executable(AsahiSpeak src/main.cpp)
+    target_compile_options(AsahiSpeak PRIVATE
+        $<$<C_COMPILER_ID:GNU,Clang>:-fno-inline -fno-inline-functions>
+        $<$<CXX_COMPILER_ID:GNU,Clang>:-fno-inline -fno-inline-functions>
+    )
 
-target_compile_options(AsahiSpeak PRIVATE
-    $<$<C_COMPILER_ID:GNU,Clang>:-fno-inline -fno-inline-functions>
-    $<$<CXX_COMPILER_ID:GNU,Clang>:-fno-inline -fno-inline-functions>
-)
+    target_compile_features(AsahiSpeak PRIVATE cxx_std_20)
 
-target_compile_features(AsahiSpeak PRIVATE cxx_std_20)
+    target_link_libraries(AsahiSpeak PRIVATE cubeb wolfssl opus renamenoise CLI11::CLI11)
 
-target_link_libraries(AsahiSpeak PRIVATE cubeb wolfssl opus renamenoise CLI11::CLI11)
-
-
-target_include_directories(AsahiSpeak PUBLIC 
-    ${PROJECT_SOURCE_DIR}/cubeb/include
-    ${PROJECT_SOURCE_DIR}/cubeb/src
-    ${PROJECT_SOURCE_DIR}/build/exports
-    ${PROJECT_SOURCE_DIR}/wolfssl-5.9.2-stable/wolfssl
-    ${PROJECT_SOURCE_DIR}/src
-    ${PROJECT_SOURCE_DIR}/opus-1.5.2/include
-    ${PROJECT_SOURCE_DIR}/ReNameNoise/include
-    ${PROJECT_SOURCE_DIR}/CLI11/include/CLI
-    ${PROJECT_SOURCE_DIR}/readerwriterqueue
-)
+    target_include_directories(AsahiSpeak PUBLIC 
+        ${PROJECT_SOURCE_DIR}/cubeb/include
+        ${PROJECT_SOURCE_DIR}/cubeb/src
+        ${PROJECT_SOURCE_DIR}/build/exports
+        ${PROJECT_SOURCE_DIR}/wolfssl-5.9.2-stable/wolfssl
+        ${PROJECT_SOURCE_DIR}/src
+        ${PROJECT_SOURCE_DIR}/opus-1.5.2/include
+        ${PROJECT_SOURCE_DIR}/ReNameNoise/include
+        ${PROJECT_SOURCE_DIR}/CLI11/include/CLI
+        ${PROJECT_SOURCE_DIR}/readerwriterqueue
+    )
+endif()
 
 if(NOT WIN32)
     add_executable(AsahiSpeakServer src/server.cpp)

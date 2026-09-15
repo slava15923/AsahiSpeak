@@ -37,3 +37,5 @@ cmake -DWOLFSSL_EXAMPLES=no -DWOLFSSL_CRYPT_TESTS=no -DWOLFSSL_DTLS=ON -DWOLFSSL
 --no-verify - off verifi cert(no recomendeted)
 
 sudo apt install ccache libx11-dev libxtst-dev libxt-dev libxinerama-dev libx11-xcb-dev libxkbcommon-dev libxkbcommon-x11-dev libxkbfile-dev mold
+
+-DASAHI_NO_COMPILE_CLIENT=ON для того чтобы не компилировать клиент
