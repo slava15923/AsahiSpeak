@@ -10,7 +10,7 @@ class JitterBuffer {
 private:
     std::mutex mutex;
     uint64_t sequence;
-    uint64_t minimalSize = 3;
+    uint64_t minimalSize = 5;
     std::map<uint64_t, T> buffer;
     unsigned int maxSize = 32;
     bool primed = false;
@@ -23,6 +23,7 @@ public:
         if(buffer.size() >= maxSize){ 
             buffer.erase(buffer.begin()); 
             buffer.try_emplace(sequence_, std::move(data));
+            std::cout << "jitter buffer overload!" << std::endl;
             return;
         }
         buffer.try_emplace(sequence_, std::move(data));
@@ -32,8 +33,8 @@ public:
     bool pop(T& data) {
         std::lock_guard<std::mutex> lock(mutex);
 
-        if (buffer.empty()) { primed = false; return false; }
         if (!primed) return false;
+        if (buffer.empty()) { primed = false;return false; }
 
         auto it = buffer.begin();
 

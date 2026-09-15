@@ -8,45 +8,12 @@
 #include "audio.hpp"
 #include <queue>
 #include "Spinlock.hpp"
-#include "ThreadRealTime.hpp"
 #include "jitterbuffer.hpp"
 #include <math.h>
+#include <unordered_map>
 
 std::atomic_flag isMuted;
 float noSound[FRAME_SIZE] = {0};
-
-class ClientIdMap {
-public:
-    uint32_t Get(uint32_t hash, int MAX_CLIENTS = 64) {
-        auto it = map_.find(hash);
-        if (it != map_.end()) return it->second;
-        if (nextId_ >= MAX_CLIENTS) return UINT32_MAX;
-        uint32_t id = nextId_++;
-        map_[hash] = id;
-        return id;
-    }
-
-    uint32_t Remove(uint32_t hash) {
-        auto it = map_.find(hash);
-        if (it == map_.end()) return UINT32_MAX;
-        uint32_t id = it->second;
-        map_.erase(it);
-        return id;
-    }
-
-    // (опционально) true, если запись существует
-    bool Contains(uint32_t hash) const {
-        return map_.find(hash) != map_.end();
-    }
-
-    // (опционально) текущее число клиентов
-    size_t Size() const { return map_.size(); }
-
-private:
-    std::unordered_map<uint32_t, uint32_t> map_;
-    uint32_t nextId_ = 0;
-};
-
 
 static inline float fastTanh(float x) noexcept {
     // Saturate, чтобы не уходить в бесконечность
@@ -61,8 +28,7 @@ static inline float fastTanh(float x) noexcept {
 
 class User {
 public:
-    User(ClientIdMap& idMap_, const uint32_t& clientHash_, const char* username_) : idMap(idMap_), clientHash(clientHash_), username(username_) {
-        mixerHash = idMap.Get(clientHash);
+    User(const uint32_t& clientHash_, const char* username_) : clientHash(clientHash_), username(username_) {
         std::cout << "connect: " << username << std::endl;
         decoder = opus_decoder_create(SAMPLE_RATE, 1, &error);
         if (error != OPUS_OK) {
@@ -80,7 +46,6 @@ public:
         return decoder;
     }
 private:
-    ClientIdMap& idMap;
     const uint32_t clientHash;
     uint32_t mixerHash;
     std::string username;
@@ -119,8 +84,7 @@ class AudioTransmission {
 
         std::unordered_map<uint32_t, std::shared_ptr<JitterBuffer<std::shared_ptr<float[]> > > > buffers;
         std::vector<uint64_t> indexBuffers;
-        std::unordered_map<uint32_t, std::unique_ptr<User>> users;
-        ClientIdMap idMap;
+        std::unordered_map<uint32_t, std::unique_ptr<User> > users;
         std::mutex mixerMtx;
         
 
@@ -187,13 +151,12 @@ class AudioTransmission {
                 if (bytes == (int)sizeof(networkDataAudio)) {
                     clientHash = receive.get()->clientHash;
                     if (!users.count(clientHash)) {
-                        users.emplace(clientHash, std::make_unique<User>(idMap,clientHash, receive->username));
+                        users.emplace(clientHash, std::make_unique<User>(clientHash, receive->username));
                         {
                             std::lock_guard<std::mutex> lock(mixerMtx);
                             buffers.emplace(clientHash, std::make_shared<JitterBuffer<std::shared_ptr<float[]>>>(receive->sequence));
                             indexBuffers.push_back(clientHash);
                         }
-                        //printf("new user\n");
                     }
                     frame = std::make_shared<float[]>(FRAME_SIZE);
                     userptr = users[clientHash].get();
@@ -206,7 +169,6 @@ class AudioTransmission {
                     }
                 } else if (bytes < 0) {
                     fprintf(stderr, "wolfSSL_read error\n");
-                    //break;
                 }
                 
             }
@@ -306,9 +268,12 @@ class AudioTransmission {
             receive = std::make_unique<networkDataAudio>();
             send = std::make_unique<networkDataAudio>();
 
-            ctx = wolfSSL_CTX_new(wolfDTLSv1_2_client_method());
+            ctx = wolfSSL_CTX_new(wolfDTLSv1_3_client_method());
             if (!ctx) error_handling("wolfSSL_CTX_new failed");
-            std::cout << "загрузка системных корневых сертификатов: " << wolfSSL_CTX_load_system_CA_certs(ctx) << std::endl;
+            std::cout << "status load system certificates: " << wolfSSL_CTX_load_system_CA_certs(ctx) << std::endl;
+
+            SetBrowserECCGroups(ctx);
+            SetBrowserDtls13Ciphers(ctx);
 
             encoder = opus_encoder_create(SAMPLE_RATE, 1, OPUS_APPLICATION_AUDIO, &error);
             if (error != OPUS_OK) {

@@ -305,7 +305,7 @@
         /* 1. Инициализация WolfSSL */
         wolfSSL_Debugging_ON();
         wolfSSL_Init();
-        WOLFSSL_CTX* ctx = wolfSSL_CTX_new(wolfDTLSv1_2_server_method());
+        WOLFSSL_CTX* ctx = wolfSSL_CTX_new(wolfDTLSv1_3_server_method());
         //WOLFSSL_CTX *ctx = wolfSSL_CTX_new(wolfTLSv1_2_server_method());
         if (!ctx) {
             fprintf(stderr, "Ошибка создания DTLS контекста\n");
@@ -335,6 +335,9 @@
             wolfSSL_ERR_error_string(e, err);
             printf("SSL error: %s (code %lu)\n", err, e);
         }
+
+        SetBrowserECCGroups(ctx);
+        SetBrowserDtls13Ciphers(ctx);
 
 
         //int client_fd;

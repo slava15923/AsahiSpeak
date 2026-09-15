@@ -29,15 +29,17 @@
 #define WOLFSSL_DTLS
 #include <string>
 
-#include <wolfssl/options.h>   // Рекомендуется подключать первым для согласованности настроек[reference:0][reference:1]
-#include <wolfssl/ssl.h>       // Основной заголовок для работы с SSL/TLS
-#include <wolfssl/wolfio.h>    // Важно! Содержит определения для пользовательских I/O колбэков[reference:2][reference:3]
-#include <wolfssl/wolfcrypt/settings.h> // Настройки криптографии, часто требуется неявно
-#include <wolfssl/wolfcrypt/error-crypt.h> // Для кодов ошибок, если используете wolfCrypt напрямую
+#include <wolfssl/options.h>
+#include <wolfssl/ssl.h>
+#include <wolfssl/wolfio.h>
+#include <wolfssl/wolfcrypt/settings.h>
+#include <wolfssl/wolfcrypt/error-crypt.h>
 #include <wolfssl/openssl/bio.h>
+#include <wolfssl/openssl/evp.h>
 
 #include <stdexcept>
 #include <memory>
+#include <iostream>
 
 #define MTU 1200
 
@@ -162,4 +164,30 @@ std::string resolve_ip_or_dns(const std::string& host) {
 
     // Если ни один адрес не подошёл (хотя результат не пуст)
     throw std::runtime_error("No valid IP address found for " + host);
+}
+
+// Настройка кривых генерации ключей ECDHE (X25519 в приоритете)
+inline void SetBrowserECCGroups(WOLFSSL_CTX* ctx) {
+    // Используем массив встроенных ID wolfSSL напрямую:
+    // WOLFSSL_ECC_X25519     -> x25519
+    // WOLFSSL_ECC_SECP256R1  -> P-256 (prime256v1)
+    int groups[] = { WOLFSSL_ECC_X25519, WOLFSSL_ECC_SECP256R1 };
+    
+    // Функция wolfSSL_CTX_set_groups принимает массив ID и его длину
+    if (wolfSSL_CTX_set_groups(ctx, groups, 2) != WOLFSSL_SUCCESS) {
+        std::cerr << "Критическая ошибка: Кривые X25519 или P-256 не поддерживаются этой сборкой wolfSSL!" << std::endl;
+    }
+}
+
+// Настройка шифров Chrome/Firefox для DTLS 1.3
+inline void SetBrowserDtls13Ciphers(WOLFSSL_CTX* ctx) {
+    const char* chrome_firefox_dtls13_ciphers = 
+        "TLS13-AES128-GCM-SHA256:"
+        "TLS13-AES256-GCM-SHA384:"
+        "TLS13-CHACHA20-POLY1305-SHA256";
+
+    if (wolfSSL_CTX_set_cipher_list(ctx, chrome_firefox_dtls13_ciphers) != WOLFSSL_SUCCESS) {
+        std::cerr << "Ошибка: Не удалось применить шифронаборы браузера для DTLS 1.3!" << std::endl;
+        std::cerr << "Проверьте, включены ли HAVE_CHACHA и HAVE_AESGCM в user_settings.h" << std::endl;
+    }
 }
