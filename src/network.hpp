@@ -56,11 +56,7 @@ const int SERVER_TIME_OUT = 5;//в секундах
 
 void error_handling(const char *msg) {
     fprintf(stderr, "Error: %s\n", msg);
-    //exit(EXIT_FAILURE);
 }
-//ниже дефайны для cmd
-
-#define CONNECT 0//команда которая означает подключение к серверу
 
 
 

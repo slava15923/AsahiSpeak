@@ -7,10 +7,11 @@
 #include <opus.h>
 #include "audio.hpp"
 #include <queue>
-#include "Spinlock.hpp"
+
 #include "jitterbuffer.hpp"
 #include <math.h>
 #include <unordered_map>
+#include "udpNonBlocking.hpp"
 
 std::atomic_flag isMuted;
 float noSound[FRAME_SIZE] = {0};
@@ -56,10 +57,10 @@ private:
 
 class AudioTransmission {
     private:
+        NonBlockingUdpSocket sock;
         std::unique_ptr<networkDataAudio> receive;
         std::unique_ptr<networkDataAudio> send;
 
-        socket_t sock;
         struct sockaddr_in server_addr;
 
         LockFreeRingBuffer& readBuffer;
@@ -86,12 +87,45 @@ class AudioTransmission {
         std::vector<uint64_t> indexBuffers;
         std::unordered_map<uint32_t, std::unique_ptr<User> > users;
         std::mutex mixerMtx;
+
+        std::mutex sslMtx;
         
 
         
         
 
         int error = 0;
+        void connect() {
+            bool handshake_done = false;
+
+            while (!handshake_done) {
+            int ret = wolfSSL_connect(ssl);
+
+            if (ret == WOLFSSL_SUCCESS) {
+                std::cout << "DTLS Handshake successfully completed!" << std::endl;
+                handshake_done = true;
+            } 
+            else {
+                int err = wolfSSL_get_error(ssl, ret);
+
+                if (err == WOLFSSL_ERROR_WANT_READ) {
+                    int wait_res = sock.wait_timeout(1, 0); 
+                    if (wait_res == -1) {
+                        throw std::runtime_error("Socket error during handshake wait.");
+                    }
+                } 
+                else if (err == WOLFSSL_ERROR_WANT_WRITE) {
+                    std::this_thread::sleep_for(std::chrono::milliseconds(10));
+                } 
+                else {
+                    char errorString[80];
+                    wolfSSL_ERR_error_string(err, errorString);
+                    std::cerr << "Критическая ошибка DTLS Handshake: " << errorString << " (код " << err << ")\n";
+                    
+                    throw std::runtime_error("DTLS handshake failed permanently.");
+                }
+            }
+        }}
 
         int mixer() noexcept {
             auto Buf = std::make_unique<float[]>(FRAME_SIZE);
@@ -142,11 +176,27 @@ class AudioTransmission {
             uint64_t clientHash;
             //q.reserve(50);
             User* userptr;
+            int err;
             
             
 
             while(running) {
-                bytes = wolfSSL_read(ssl, receive.get(), sizeof(networkDataAudio));
+                int wait_res = sock.wait_timeout(5, 0);
+
+                if (wait_res == 0) {
+                    std::cerr << "time out server" << std::endl;
+                    std::cerr << "reconect" << std::endl;
+                    continue; 
+                } else if (wait_res == -1) {
+                    std::cerr << "system socket error" << std::endl;
+                    break;
+                }
+
+                {
+                    std::lock_guard<std::mutex> lock(sslMtx);
+                    bytes = wolfSSL_read(ssl, receive.get(), sizeof(networkDataAudio));
+                    err = wolfSSL_get_error(ssl, bytes);
+                }
 
                 if (bytes == (int)sizeof(networkDataAudio)) {
                     clientHash = receive.get()->clientHash;
@@ -167,8 +217,20 @@ class AudioTransmission {
                             buffers[clientHash].get()->push(receive->sequence, std::move(frame));
                         }
                     }
-                } else if (bytes < 0) {
-                    fprintf(stderr, "wolfSSL_read error\n");
+                } else {
+
+                    if (err == WOLFSSL_ERROR_WANT_READ) {
+                        continue;
+                    } 
+                    else if (err == WOLFSSL_ERROR_WANT_WRITE) {
+                        continue;
+                    } 
+                    else {
+                        char errorString[80];
+                        wolfSSL_ERR_error_string(err, errorString);
+                        fprintf(stderr, "wolfSSL_read critical error: %s (code %d)\n", errorString, err);
+                        break; 
+                    }
                 }
                 
             }
@@ -177,6 +239,8 @@ class AudioTransmission {
         }
 
         int writeData() {
+            int err;
+            int res;
             uint32_t sendSeq_ = 0;
             auto tempPCMData = std::make_unique<float[]>(FRAME_SIZE);
 
@@ -187,6 +251,7 @@ class AudioTransmission {
             int n;
 
             while (running) {
+                bool packet_sent = false;
                 n = recordBuffer.readBlocking(tempPCMData.get(), FRAME_SIZE);
                 if (n != (int)FRAME_SIZE) continue;
 
@@ -197,9 +262,34 @@ class AudioTransmission {
 
                 send->sequence = sendSeq_++;
 
-                if (wolfSSL_write(ssl, send.get(), sizeof(networkDataAudio))
-                        != (int)sizeof(networkDataAudio)) {
-                    fprintf(stderr, "wolfSSL_write failed\n");
+                while (running && !packet_sent) {
+                    
+                    {
+                        std::lock_guard<std::mutex> lock(sslMtx);
+                        res = wolfSSL_write(ssl, send.get(), sizeof(networkDataAudio));
+                        err = wolfSSL_get_error(ssl, res);
+                    }
+
+                    if (res == (int)sizeof(networkDataAudio)) {
+                        packet_sent = true;
+                    } 
+                    else {
+
+                        if (err == WOLFSSL_ERROR_WANT_WRITE) {
+                            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+                        } 
+                        else if (err == WOLFSSL_ERROR_WANT_READ) {
+                            sock.wait_timeout(0, 1000); 
+                        } 
+                        else {
+                            char errorString[256];
+                            wolfSSL_ERR_error_string(err, errorString);
+                            fprintf(stderr, "wolfSSL_write критическая ошибка: %s (код %d)\n", errorString, err);
+                            
+                            running = false;
+                            break;
+                        }
+                    }
                 }
             }
             return 0;
@@ -209,15 +299,14 @@ class AudioTransmission {
 
             ssl = wolfSSL_new(ctx);
             if (!ssl) error_handling("wolfSSL_new failed");
-            wolfSSL_set_fd(ssl, sock);
+            wolfSSL_set_fd(ssl, sock.get_handle());
 
             wolfSSL_dtls_set_peer(ssl, (struct sockaddr*)&server_addr, sizeof(server_addr));
             wolfSSL_dtls_set_mtu(ssl, MTU);
 
-            while(wolfSSL_connect(ssl) != SSL_SUCCESS) {
-                fprintf(stderr, "wolfSSL_connect failed\n");
-                std::this_thread::sleep_for(std::chrono::seconds(1));
-            }
+            wolfSSL_set_using_nonblock(ssl, 1);
+
+            connect();
 
             printf("TLS handshake successful\n");
 
@@ -250,14 +339,6 @@ class AudioTransmission {
             int numchannel_, LockFreeRingBuffer& recordBuffer_, 
             LockFreeRingBuffer& readBuffer_) 
             : recordBuffer(recordBuffer_), readBuffer(readBuffer_), username(username_), numchannel(numchannel_) {
-
-            sock = create_udp_socket();
-
-            #ifdef _WIN32
-                if (sock == INVALID_SOCKET) error_handling(" udp socket creation failed");
-            #else
-                if (sock < 0) error_handling(" udp socket creation failed");
-            #endif
             
             server_addr.sin_family = AF_INET;
             server_addr.sin_port = htons(port);
@@ -297,12 +378,7 @@ class AudioTransmission {
         }
 
         ~AudioTransmission() {
-                #ifdef _WIN32
-                    closesocket(sock);
-                #else
-                    close(sock);
-                #endif
-                wolfSSL_CTX_free(ctx);
+            wolfSSL_CTX_free(ctx);
         }
         //запускает передачу данных на udp сервер
         void startTransmission() {
