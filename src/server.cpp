@@ -51,6 +51,8 @@
         std::unordered_map<uint64_t, std::unique_ptr<SessionData>>& users;
         std::vector<uint64_t>& sessionsHash;
 
+        pongPacket pong;
+
         SessionData(const uint64_t& clientHash_, socket_t server_fd_,
                     WOLFSSL_CTX* ctx, const struct sockaddr_in addr_,
                     std::vector<std::vector<uint64_t>>& usersInChannels_,
@@ -69,6 +71,7 @@
             wolfSSL_SetIOWriteCtx(ssl, this);
             wolfSSL_SetIOReadCtx(ssl, nullptr);
             buf = new char[sizeBuf]; 
+            pong.clientHash = clientHash;
 
 
             updateLastUsed();
@@ -133,13 +136,11 @@
                     memset(data->password, 0, sizeof(networkDataAudio::password));
                     for(auto& user : usersInChannels[channel]) {
                         if(user != clientHash) {
-                            //user.get()->send(buf, ret);
                             data->clientHash = clientHash;
                             users[user].get()->send(buf,ret);
                         }
                     }
-                    //username = audio->username;
-                    //wolfSSL_write(ssl, buf, ret);
+                    send((char*)&pong, sizeof(pongPacket));
                     updateLastUsed();
                 }
             } else if (ret == 0) {

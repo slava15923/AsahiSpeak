@@ -17,19 +17,16 @@ std::atomic_flag isMuted;
 float noSound[FRAME_SIZE] = {0};
 
 static inline float fastTanh(float x) noexcept {
-    // Saturate, чтобы не уходить в бесконечность
     if (x < -3.0f) return -1.0f;
     if (x >  3.0f) return  1.0f;
 
     const float x2 = x * x;
-    // Padé(3,3) для tanh:
-    //   tanh(x) ≈ x * (27 + x²) / (27 + 9·x²)
     return x * (27.0f + x2) / (27.0f + 9.0f * x2);
 }
 
 class User {
 public:
-    User(const uint32_t& clientHash_, const char* username_) : clientHash(clientHash_), username(username_) {
+    User(const uint32_t& clientHash_, const uint64_t& startSequence, const char* username_) : clientHash(clientHash_), username(username_), buffer(startSequence) {
         std::cout << "connect: " << username << std::endl;
         decoder = opus_decoder_create(SAMPLE_RATE, 1, &error);
         if (error != OPUS_OK) {
@@ -46,11 +43,20 @@ public:
     OpusDecoder* getOpusDecoder() {
         return decoder;
     }
+
+    void push(const uint64_t sequence_, std::shared_ptr<float []> data) {
+        buffer.push(sequence_, data);
+    }
+
+    bool pop(std::shared_ptr<float []>& data) {
+        return buffer.pop(data);
+    }
 private:
     const uint32_t clientHash;
     uint32_t mixerHash;
     std::string username;
     OpusDecoder* decoder;
+    JitterBuffer<std::shared_ptr<float[]>> buffer;
     int error;
 
 };
@@ -83,9 +89,7 @@ class AudioTransmission {
 
         int numchannel;
 
-        std::unordered_map<uint32_t, std::shared_ptr<JitterBuffer<std::shared_ptr<float[]> > > > buffers;
-        std::vector<uint64_t> indexBuffers;
-        std::unordered_map<uint32_t, std::unique_ptr<User> > users;
+        std::unordered_map<uint32_t, std::shared_ptr<User> > users;
         std::mutex mixerMtx;
 
         std::mutex sslMtx;
@@ -120,7 +124,7 @@ class AudioTransmission {
                 else {
                     char errorString[80];
                     wolfSSL_ERR_error_string(err, errorString);
-                    std::cerr << "Критическая ошибка DTLS Handshake: " << errorString << " (код " << err << ")\n";
+                    std::cerr << "critical error DTLS Handshake: " << errorString << " (code " << err << ")\n";
                     
                     throw std::runtime_error("DTLS handshake failed permanently.");
                 }
@@ -145,8 +149,9 @@ class AudioTransmission {
 
                 {
                     std::lock_guard<std::mutex> lock(mixerMtx);
-                    for(const auto& index : indexBuffers) {
-                        if(buffers[index].get()->pop(temp)) {
+                    for(const auto it : users) {
+                        User* userptr = it.second.get();
+                        if(userptr->pop(temp)) {
                             for(int i = 0; i < FRAME_SIZE; i++) {
                                 dst[i] += temp.get()[i];
                             }
@@ -197,25 +202,22 @@ class AudioTransmission {
                     bytes = wolfSSL_read(ssl, receive.get(), sizeof(networkDataAudio));
                     err = wolfSSL_get_error(ssl, bytes);
                 }
+                if(bytes > 0) {
+                    if (bytes == (int)sizeof(networkDataAudio)) {
+                        clientHash = receive.get()->clientHash;
+                        if (!users.count(clientHash)) users.emplace(clientHash, std::make_shared<User>(clientHash, receive->sequence, receive->username));
 
-                if (bytes == (int)sizeof(networkDataAudio)) {
-                    clientHash = receive.get()->clientHash;
-                    if (!users.count(clientHash)) {
-                        users.emplace(clientHash, std::make_unique<User>(clientHash, receive->username));
-                        {
-                            std::lock_guard<std::mutex> lock(mixerMtx);
-                            buffers.emplace(clientHash, std::make_shared<JitterBuffer<std::shared_ptr<float[]>>>(receive->sequence));
-                            indexBuffers.push_back(clientHash);
+                        frame = std::make_shared<float[]>(FRAME_SIZE);
+                        userptr = users[clientHash].get();
+                        decoded = opus_decode_float(userptr->getOpusDecoder(), receive->frames, 160, frame.get(), FRAME_SIZE, 0);
+                        if (decoded == (int)FRAME_SIZE) {
+                            {
+                                std::lock_guard<std::mutex> lock(mixerMtx);
+                                users[clientHash].get()->push(receive->sequence, std::move(frame));
+                            }
                         }
-                    }
-                    frame = std::make_shared<float[]>(FRAME_SIZE);
-                    userptr = users[clientHash].get();
-                    decoded = opus_decode_float(userptr->getOpusDecoder(), receive->frames, 160, frame.get(), FRAME_SIZE, 0);
-                    if (decoded == (int)FRAME_SIZE) {
-                        {
-                            std::lock_guard<std::mutex> lock(mixerMtx);
-                            buffers[clientHash].get()->push(receive->sequence, std::move(frame));
-                        }
+                    } else if(bytes == (int)sizeof(pongPacket)) {
+                        continue;
                     }
                 } else {
 

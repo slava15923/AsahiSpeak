@@ -70,6 +70,10 @@ struct networkDataAudio {
     unsigned char frames[160];
 };
 
+struct pongPacket {
+    uint64_t clientHash;
+};
+
 class serverUserData {
 
 };
