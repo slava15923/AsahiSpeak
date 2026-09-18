@@ -1,3 +1,5 @@
+AsahiSpeak version v0.1.0
+
 этот проект задумавается, как простой голосовой чат с интерфейсом
 
 клиент и сервер в процессе реализации.
@@ -15,7 +17,7 @@
 
 компиляция под: linux mint
 
-git clone --recurse-submodules -b unstable https://github.com/slava15923/AsahiSpeak.git
+git clone -r https://github.com/slava15923/AsahiSpeak.git
 
 mkdir build && cd build && cmake .. && cmake --build . && ./AsahiSpeak
 
