@@ -7,6 +7,7 @@
 #include <opus.h>
 #include "audio.hpp"
 #include <queue>
+#include <algorithm>
 
 #include "jitterbuffer.hpp"
 #include <math.h>
@@ -44,11 +45,11 @@ public:
         return decoder;
     }
 
-    void push(const uint64_t sequence_, std::shared_ptr<float []> data) {
-        buffer.push(sequence_, data);
+    void push(const uint64_t sequence_, std::unique_ptr<float []> data) {
+        buffer.push(sequence_, std::move(data));
     }
 
-    bool pop(std::shared_ptr<float []>& data) {
+    bool pop(std::unique_ptr<float []>& data) {
         return buffer.pop(data);
     }
 private:
@@ -56,14 +57,14 @@ private:
     uint32_t mixerHash;
     std::string username;
     OpusDecoder* decoder;
-    JitterBuffer<std::shared_ptr<float[]>> buffer;
+    JitterBuffer<std::unique_ptr<float[]>> buffer;
     int error;
 
 };
 
 class AudioTransmission {
     private:
-        NonBlockingUdpSocket sock;
+        
         std::unique_ptr<networkDataAudio> receive;
         std::unique_ptr<networkDataAudio> send;
 
@@ -89,49 +90,77 @@ class AudioTransmission {
 
         int numchannel;
 
-        std::unordered_map<uint32_t, std::shared_ptr<User> > users;
+        std::unordered_map<uint32_t, std::unique_ptr<User> > users;
         std::mutex mixerMtx;
 
         std::mutex sslMtx;
-        
 
-        
-        
+        bool isReconect = false;
+
+        NonBlockingUdpSocket sock;
 
         int error = 0;
+
         void connect() {
-            bool handshake_done = false;
+            using namespace std::chrono;
 
-            while (!handshake_done) {
-            int ret = wolfSSL_connect(ssl);
+            auto deadline = steady_clock::now() + seconds(300);
 
-            if (ret == WOLFSSL_SUCCESS) {
-                std::cout << "DTLS Handshake successfully completed!" << std::endl;
-                handshake_done = true;
-            } 
-            else {
+            while (true) {
+                if (stopFlag.load())
+                    throw std::runtime_error("handshake aborted by stopFlag");
+
+                if (steady_clock::now() > deadline)
+                    throw std::runtime_error("handshake timeout");
+
+                int ret = wolfSSL_connect(ssl);
+
+                if (ret == WOLFSSL_SUCCESS) {
+                    std::cout << "DTLS Handshake successfully completed!\n";
+                    return;
+                }
+
                 int err = wolfSSL_get_error(ssl, ret);
 
-                if (err == WOLFSSL_ERROR_WANT_READ) {
-                    int wait_res = sock.wait_timeout(1, 0); 
-                    if (wait_res == -1) {
-                        throw std::runtime_error("Socket error during handshake wait.");
+                if (err == WOLFSSL_ERROR_WANT_READ || err == WOLFSSL_ERROR_WANT_WRITE) {
+                    int timeout_sec = wolfSSL_dtls_get_current_timeout(ssl);
+                    if (timeout_sec <= 0) timeout_sec = 1;
+
+                    if (wolfSSL_dtls13_use_quick_timeout(ssl)) {
+                        timeout_sec = std::max(1, timeout_sec / 4);
                     }
-                } 
-                else if (err == WOLFSSL_ERROR_WANT_WRITE) {
-                    std::this_thread::sleep_for(std::chrono::milliseconds(10));
-                } 
-                else {
-                    char errorString[80];
-                    wolfSSL_ERR_error_string(err, errorString);
-                    std::cerr << "critical error DTLS Handshake: " << errorString << " (code " << err << ")\n";
-                    
-                    throw std::runtime_error("DTLS handshake failed permanently.");
+
+                    WaitMode mode = (err == WOLFSSL_ERROR_WANT_READ) ? WaitMode::Read : WaitMode::Write;
+                    int sel = sock.wait_timeout(timeout_sec, 0, mode);
+
+                    if (sel < 0) {
+                        if (errno == EINTR) continue;
+                        throw std::runtime_error("select() failed during handshake");
+                    }
+
+                    if (sel == 0) {
+                        if (wolfSSL_dtls_got_timeout(ssl) != WOLFSSL_SUCCESS) {
+                            throw std::runtime_error("DTLS handshake exceeded max retransmits");
+                        }
+                    }
+                    continue;
                 }
+
+                if (err == WOLFSSL_ERROR_ZERO_RETURN) {
+                    throw std::runtime_error("DTLS connection closed during handshake");
+                }
+
+                char errorString[256];
+                wolfSSL_ERR_error_string_n(err, errorString, sizeof(errorString));
+                std::cerr << "critical error DTLS handshake: " << errorString
+                        << " (code " << err << ")\n";
+                throw std::runtime_error("DTLS handshake failed permanently");
             }
-        }}
+        }
+
 
         int mixer() noexcept {
+            std::cout << "start mixer()" << std::endl;
             auto Buf = std::make_unique<float[]>(FRAME_SIZE);
             int mixed = 0;
             std::vector<std::shared_ptr<float[]>> localBuffer;
@@ -144,12 +173,12 @@ class AudioTransmission {
 
                 float* dst = Buf.get();
                 std::fill(dst, dst + FRAME_SIZE, 0.0f);
-                std::shared_ptr<float[]> temp;
+                std::unique_ptr<float[]> temp;
                 
 
                 {
                     std::lock_guard<std::mutex> lock(mixerMtx);
-                    for(const auto it : users) {
+                    for(const auto& it : users) {
                         User* userptr = it.second.get();
                         if(userptr->pop(temp)) {
                             for(int i = 0; i < FRAME_SIZE; i++) {
@@ -171,27 +200,28 @@ class AudioTransmission {
 
                 mixed = 0;
             }
+            std::cout << "end mixer()" << std::endl;
             return 0;
         }
 
         int readData() {
-            std::shared_ptr<float[]> frame;
+            std::cout << "start readData()" << std::endl;
+            std::unique_ptr<float[]> frame;
             int bytes;
             int decoded;
             uint64_t clientHash;
-            //q.reserve(50);
             User* userptr;
             int err;
             
-            
-
             while(running) {
                 int wait_res = sock.wait_timeout(5, 0);
 
                 if (wait_res == 0) {
                     std::cerr << "time out server" << std::endl;
-                    std::cerr << "reconect" << std::endl;
-                    continue; 
+                    //std::cerr << "reconect" << std::endl;
+                    isReconect = true;
+                    running = false;
+                    break;
                 } else if (wait_res == -1) {
                     std::cerr << "system socket error" << std::endl;
                     break;
@@ -205,9 +235,9 @@ class AudioTransmission {
                 if(bytes > 0) {
                     if (bytes == (int)sizeof(networkDataAudio)) {
                         clientHash = receive.get()->clientHash;
-                        if (!users.count(clientHash)) users.emplace(clientHash, std::make_shared<User>(clientHash, receive->sequence, receive->username));
+                        if (!users.count(clientHash)) users.emplace(clientHash, std::make_unique<User>(clientHash, receive->sequence, receive->username));
 
-                        frame = std::make_shared<float[]>(FRAME_SIZE);
+                        frame = std::make_unique<float[]>(FRAME_SIZE);
                         userptr = users[clientHash].get();
                         decoded = opus_decode_float(userptr->getOpusDecoder(), receive->frames, 160, frame.get(), FRAME_SIZE, 0);
                         if (decoded == (int)FRAME_SIZE) {
@@ -236,11 +266,12 @@ class AudioTransmission {
                 }
                 
             }
-            //delete dataForReceive;
+            std::cout << "end readData()" << std::endl;
             return 0;
         }
 
         int writeData() {
+            std::cout << "start writeData()" << std::endl;
             int err;
             int res;
             uint32_t sendSeq_ = 0;
@@ -294,38 +325,49 @@ class AudioTransmission {
                     }
                 }
             }
+            std::cout << "end writeData()" << std::endl;
             return 0;
         }
 
         void controlThread() {
+            std::cout << "start controlThread()" << std::endl;
+            isReconect = true;
 
-            ssl = wolfSSL_new(ctx);
-            if (!ssl) error_handling("wolfSSL_new failed");
-            wolfSSL_set_fd(ssl, sock.get_handle());
+            while (!stopFlag) {
+                if(isReconect){
+                    ssl = wolfSSL_new(ctx);
+                    isReconect = false;
+                } else {
+                    stopFlag = true;
+                    break;
+                }
 
-            wolfSSL_dtls_set_peer(ssl, (struct sockaddr*)&server_addr, sizeof(server_addr));
-            wolfSSL_dtls_set_mtu(ssl, MTU);
+                NonBlockingUdpSocket sock_;
+                sock = std::move(sock_);
 
-            wolfSSL_set_using_nonblock(ssl, 1);
+                if (ssl == nullptr) error_handling("wolfSSL_new failed");
 
-            connect();
+                socket_t fd = sock.get_handle();
+                
+                wolfSSL_dtls_set_peer(ssl, (struct sockaddr*)&server_addr, sizeof(server_addr));
+                wolfSSL_set_fd(ssl, fd);
+                wolfSSL_dtls_set_mtu(ssl, MTU);
 
-            printf("TLS handshake successful\n");
+                wolfSSL_set_using_nonblock(ssl, 1);
 
-            if (wolfSSL_dtls_cid_is_enabled(ssl) == 1) {
-                printf("CID успешно согласован!\n");
+                connect();
+
+                running = true;
+                write = std::thread(&AudioTransmission::writeData, this);
+                read = std::thread(&AudioTransmission::readData, this);
+
+                std::thread mixer_(&AudioTransmission::mixer, this);
+                write.join();
+                read.join();
+                mixer_.join();
+                wolfSSL_free(ssl);
             }
-            running = true;
-            write = std::thread(&AudioTransmission::writeData, this);
-            read = std::thread(&AudioTransmission::readData, this);
-            //ThreadRealTime mixer_(80, &AudioTransmission::mixer, this);
-            std::thread mixer_(&AudioTransmission::mixer, this);
-            write.detach();
-            read.detach();
-            mixer_.detach();
-
-            while(running) {std::this_thread::sleep_for(std::chrono::milliseconds(1));}
-            //while(statusReadData || statusWriteData) {}
+            std::cout << "end controlThread()" << std::endl;
         }
 
         void setClientVolume(uint32_t clientId, float gain) {
@@ -333,6 +375,7 @@ class AudioTransmission {
         }
         float clientVolume(uint32_t clientId) const {
         //    return jitter.GetClientGain(clientId);
+            return 0.0f;//placeholder
         }
 
     public:

@@ -19,7 +19,7 @@ endif()
 if (NOT WIN32)
     set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -fuse-ld=mold")
     set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} -fuse-ld=mold")
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O3 -march=native -ffast-math")
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O2 -march=native -ffast-math -pipe")
 endif()
 
 
@@ -75,10 +75,10 @@ if(NOT ASAHI_NO_COMPILE_CLIENT)
     add_subdirectory(cubeb)
     add_executable(AsahiSpeak src/main.cpp)
 
-    target_compile_options(AsahiSpeak PRIVATE
-        $<$<C_COMPILER_ID:GNU,Clang>:-fno-inline -fno-inline-functions>
-        $<$<CXX_COMPILER_ID:GNU,Clang>:-fno-inline -fno-inline-functions>
-    )
+    #target_compile_options(AsahiSpeak PRIVATE
+    #    $<$<C_COMPILER_ID:GNU,Clang>:-fno-inline -fno-inline-functions>
+    #    $<$<CXX_COMPILER_ID:GNU,Clang>:-fno-inline -fno-inline-functions>
+    #)
 
     target_compile_features(AsahiSpeak PRIVATE cxx_std_20)
 
@@ -106,4 +106,6 @@ if(NOT WIN32)
         ${PROJECT_SOURCE_DIR}/wolfssl-5.9.2-stable/wolfssl
         ${PROJECT_SOURCE_DIR}/src
     )
+
+    set_target_properties(AsahiSpeakServer PROPERTIES UNITY_BUILD ON)
 endif()

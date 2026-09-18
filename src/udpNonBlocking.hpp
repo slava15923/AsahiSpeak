@@ -29,6 +29,8 @@
     #define SOCKET_ERROR (-1)
 #endif
 
+enum class WaitMode { Read, Write, Both };
+
 
 inline static void close_socket(socket_t sock) {
 #ifdef _WIN32
@@ -170,28 +172,29 @@ public:
         }
     }
 
-    int wait_timeout(int seconds, int microseconds=0) const {
+    int wait_timeout(int seconds, int microseconds = 0, WaitMode mode = WaitMode::Read) const {
         if (m_sock == INVALID_SOCKET) return -1;
 
-        fd_set readfds;
-        FD_ZERO(&readfds);
-        FD_SET(m_sock, &readfds);
+        fd_set rfds, wfds;
+        fd_set* rp = nullptr;
+        fd_set* wp = nullptr;
 
-        struct timeval timeout;
-        timeout.tv_sec = seconds;
-        timeout.tv_usec = microseconds;
-
-        // На Linux обязательно передавать (m_sock + 1), на Windows это игнорируется, но работает корректно
-        #ifdef _WIN32
-            int select_ret = select(0, &readfds, NULL, NULL, &timeout);
-        #else
-            int select_ret = select(m_sock + 1, &readfds, NULL, NULL, &timeout);
-        #endif
-
-        if (select_ret == SOCKET_ERROR) {
-            return -1;
+        if (mode == WaitMode::Read || mode == WaitMode::Both) {
+            FD_ZERO(&rfds); FD_SET(m_sock, &rfds); rp = &rfds;
         }
-        return select_ret > 0 ? 1 : 0;
+        if (mode == WaitMode::Write || mode == WaitMode::Both) {
+            FD_ZERO(&wfds); FD_SET(m_sock, &wfds); wp = &wfds;
+        }
+
+        struct timeval tv{ seconds, microseconds };
+
+        #ifdef _WIN32
+            int r = select(0, rp, wp, nullptr, &tv);
+        #else
+            int r = select(m_sock + 1, rp, wp, nullptr, &tv);
+        #endif
+            if (r == SOCKET_ERROR) return -1;
+            return r > 0 ? 1 : 0;
     }
 
     // ГЕТТЕР СОКЕТА (getsocket) для wolfSSL
