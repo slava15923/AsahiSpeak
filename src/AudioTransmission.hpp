@@ -227,11 +227,14 @@ class AudioTransmission {
                     break;
                 }
 
+                if(stopFlag) break;
+
                 {
                     std::lock_guard<std::mutex> lock(sslMtx);
                     bytes = wolfSSL_read(ssl, receive.get(), sizeof(networkDataAudio));
                     err = wolfSSL_get_error(ssl, bytes);
                 }
+                
                 if(bytes > 0) {
                     if (bytes == (int)sizeof(networkDataAudio)) {
                         clientHash = receive.get()->clientHash;
@@ -362,10 +365,11 @@ class AudioTransmission {
                 read = std::thread(&AudioTransmission::readData, this);
 
                 std::thread mixer_(&AudioTransmission::mixer, this);
-                write.join();
                 read.join();
+                write.join();
                 mixer_.join();
                 wolfSSL_free(ssl);
+                users.clear();
             }
             std::cout << "end controlThread()" << std::endl;
         }
@@ -425,7 +429,6 @@ class AudioTransmission {
         ~AudioTransmission() {
             wolfSSL_CTX_free(ctx);
         }
-        //запускает передачу данных на udp сервер
         void startTransmission() {
             controlthread = std::thread(&AudioTransmission::controlThread, this);
         }

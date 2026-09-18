@@ -23,7 +23,7 @@ public:
         if(buffer.size() >= maxSize){ 
             buffer.erase(buffer.begin()); 
             buffer.try_emplace(sequence_, std::move(data));
-            std::cout << "jitter buffer overload!" << std::endl;
+            //std::cout << "jitter buffer overload!" << std::endl;
             return;
         }
         buffer.try_emplace(sequence_, std::move(data));

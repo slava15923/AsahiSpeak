@@ -58,7 +58,10 @@ void error_handling(const char *msg) {
     fprintf(stderr, "Error: %s\n", msg);
 }
 
-
+enum class StatusClient {
+    connect=0,
+    dissconect
+};
 
 struct networkDataAudio {
     char cmd;
