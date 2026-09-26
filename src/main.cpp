@@ -13,7 +13,7 @@
 #include "network.hpp"
 #include "AudioTransmission.hpp"
 #include <audioIO.hpp>
-#include "cmd.hpp"
+#include "gui/gui.hpp"
 
 
 
@@ -26,6 +26,8 @@
 
 
 //0,02с ЭТО 882 ФРЕЙМОВ
+
+float noSound[FRAME_SIZE] = {0};
 
 
 
@@ -63,7 +65,7 @@ extern "C" long data_micro(cubeb_stream * stm, void * user,
     LockFreeRingBuffer* recordBuffer = (LockFreeRingBuffer*)user;
 
     const float* in = static_cast<const float*>(input_buffer);
-    if(isMuted.test()) {
+    if(recordBuffer->getStatusMute()) {
         recordBuffer->write(noSound, nframes);
     } else {
         recordBuffer->write(in, nframes);
@@ -120,8 +122,6 @@ int main(int argc, char* argv[]) {
         WSAStartup(MAKEWORD(2, 2), &wsaData);
     #endif
 
-    CLI_DATA data = parseCli(argc, argv);
-
     std::cout << "hello world" << std::endl;
 
     uint32_t rate;
@@ -141,37 +141,28 @@ int main(int argc, char* argv[]) {
     params.prefs = CUBEB_STREAM_PREF_NONE;
     std::cout << cubeb_get_min_latency(app_ctx, &params, &latency_frames) << std::endl;
 
+    std::cout << latency_frames << std::endl;
+
+    wolfSSL_Init();
+    
     audioInput micro(app_ctx, SAMPLE_RATE, latency_frames);
     micro.startRecord();
 
     audioOut dinamic(app_ctx, SAMPLE_RATE, latency_frames);
     dinamic.startRead();
+        
+    AudioTransmission udpClient(micro.getBuffer(), dinamic.getBuffer());
 
-    std::cout << latency_frames << std::endl;
+    GUI gui("test", udpClient);
 
+        //udpClient.addServerSert("server-cert.pem");
+        //if(data.serverCertVerifi) udpClient.offCertVerify();
 
-    
-    
-
-    wolfSSL_Init();
-    AudioTransmission udpClient(data.ip.c_str(), data.port, data.username.c_str(), data.password.c_str(), data.channel, micro.getBuffer(), dinamic.getBuffer());
-
-    //udpClient.addServerSert("server-cert.pem");
-    if(data.serverCertVerifi) udpClient.offCertVerify();
-
-    udpClient.startTransmission();
-
-    std::this_thread::sleep_for(std::chrono::seconds(5));
-
-    
+        //udpClient.startTransmission("127.0.0.1",15923,"0","0",0);
 
     getchar();
-
-    udpClient.stopTransmission();
 
     wolfSSL_Cleanup();
-
-    getchar();
 
     cubeb_destroy(app_ctx);
 

@@ -1,11 +1,15 @@
 #pragma once
+
+#ifndef AudioTransmission1
+
+#define AudioTransmission1
+
 #include "network.hpp"
 #include "LockFreeRingBuffer.hpp"
 #include <thread>
 #include <chrono>
 #include <optional>
 #include <opus.h>
-#include "audio.hpp"
 #include <queue>
 #include <algorithm>
 
@@ -14,8 +18,8 @@
 #include <unordered_map>
 #include "udpNonBlocking.hpp"
 
-std::atomic_flag isMuted;
-float noSound[FRAME_SIZE] = {0};
+
+
 
 static inline float fastTanh(float x) noexcept {
     if (x < -3.0f) return -1.0f;
@@ -84,7 +88,6 @@ class AudioTransmission {
         std::atomic<bool> stopFlag = false;
 
         OpusEncoder* encoder;
-        OpusDecoder* decoder;
 
         std::string username;
 
@@ -368,7 +371,7 @@ class AudioTransmission {
                 read.join();
                 write.join();
                 mixer_.join();
-                wolfSSL_free(ssl);
+                if (ssl) { wolfSSL_free(ssl); ssl = nullptr; }
                 users.clear();
             }
             std::cout << "end controlThread()" << std::endl;
@@ -383,20 +386,8 @@ class AudioTransmission {
         }
 
     public:
-        AudioTransmission(const char* ip, uint16_t port, 
-            const char* username_, const char* password, 
-            int numchannel_, LockFreeRingBuffer& recordBuffer_, 
-            LockFreeRingBuffer& readBuffer_) 
-            : recordBuffer(recordBuffer_), readBuffer(readBuffer_), username(username_), numchannel(numchannel_) {
-            
-            server_addr.sin_family = AF_INET;
-            server_addr.sin_port = htons(port);
-
-            if (inet_pton(AF_INET, ip, &server_addr.sin_addr) <= 0)
-                error_handling("invalid server IP");
-
-            receive = std::make_unique<networkDataAudio>();
-            send = std::make_unique<networkDataAudio>();
+        AudioTransmission(LockFreeRingBuffer& recordBuffer_, LockFreeRingBuffer& readBuffer_) 
+            : recordBuffer(recordBuffer_), readBuffer(readBuffer_) {
 
             ctx = wolfSSL_CTX_new(wolfDTLSv1_3_client_method());
             if (!ctx) error_handling("wolfSSL_CTX_new failed");
@@ -416,28 +407,44 @@ class AudioTransmission {
 
             opus_encoder_ctl(encoder, OPUS_SET_COMPLEXITY(0));
 
-            decoder = opus_decoder_create(SAMPLE_RATE, 1, &error);
-            if (error != OPUS_OK) {
-                std::cerr << "Ошибка создания декодера: " << opus_strerror(error) << std::endl;
-            }
-
 
 
             
         }
 
         ~AudioTransmission() {
-            wolfSSL_CTX_free(ctx);
+            stopTransmission();
+            if (encoder) { opus_encoder_destroy(encoder); encoder = nullptr; }
+
+            if (ctx) { wolfSSL_CTX_free(ctx); ctx = nullptr; }
         }
-        void startTransmission() {
+        void startTransmission(const char* ip, uint16_t port, const char* username_, const char* password, int numchannel_) {
+            username = username_;
+            numchannel = numchannel_;
+
+            server_addr.sin_family = AF_INET;
+            server_addr.sin_port = htons(port);
+
+            if (inet_pton(AF_INET, ip, &server_addr.sin_addr) <= 0)
+                error_handling("invalid server IP");
+
+            receive = std::make_unique<networkDataAudio>();
+            send = std::make_unique<networkDataAudio>();
+
             controlthread = std::thread(&AudioTransmission::controlThread, this);
         }
 
         void stopTransmission() {
             if (running) {
                 running = false;
-                //while(statusReadData || statusWriteData) {}
-                wolfSSL_free(ssl);
+                stopFlag = true;
+
+                if (controlthread.joinable()) controlthread.join();
+                if (read.joinable())          read.join();
+                if (write.joinable())         write.join();
+
+                if (ssl) { wolfSSL_free(ssl); ssl = nullptr; }
+
             }
         }
 
@@ -445,7 +452,6 @@ class AudioTransmission {
 
         void addServerSert(const char *file) {
             if (wolfSSL_CTX_load_verify_locations(ctx, file, 0) != SSL_SUCCESS) {
-                //
                 throw std::runtime_error("CA certificates not loaded, trying without verification");
             }
         }
@@ -455,9 +461,16 @@ class AudioTransmission {
         }
 
         void mute() {
-            isMuted.test_and_set();
+            recordBuffer.mute();
         }
+
         void unmute() {
-            isMuted.clear();
+            recordBuffer.unmute();
+        }
+
+        bool getStatusMute() {
+            return recordBuffer.getStatusMute();
         }
 };
+
+#endif

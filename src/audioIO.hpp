@@ -43,6 +43,8 @@ class audioInput {
         cubeb* ctx;
         std::thread noiseThread;
 
+        bool stopFlag_ = false;
+
         /*функция для работы с МОНО микрофоном в cubeb*/
         static long data_micro(cubeb_stream * stm, void * user,
                     const void * input_buffer,  // Данные с микрофона
@@ -68,6 +70,7 @@ class audioInput {
 
             while(true) {
                 if(noiseCancellation.readBlocking(temp1.get(),frame_size) == frame_size) {
+                    if(stopFlag_) return;
                     noise.processFrame(temp1.get(), temp2.get());
                     buffer.write(temp2.get(), frame_size);
                 }
@@ -97,7 +100,16 @@ class audioInput {
             noiseThread = std::thread(&audioInput::audio_processing_worker_thread,this);
         }
 
-        void stop() {cubeb_stream_stop(stm);}
+        void stop() {
+            cubeb_stream_stop(stm);
+
+            stopFlag_ = true;
+
+            float dummy[480] = {0};
+            noiseCancellation.write(dummy, 480);
+
+            if (noiseThread.joinable()) noiseThread.join();
+        }
 
         LockFreeRingBuffer& getBuffer() { return buffer;}
 
@@ -145,11 +157,11 @@ class audioOut {
     public:
         audioOut(cubeb* ctx_, const uint32_t& rate_, const uint32_t& latency_) : ctx(ctx_), rate(rate_), latency(latency_),
         buffer(RING_SIZE) {
-        params.format = CUBEB_SAMPLE_FLOAT32NE; 
-        params.rate = rate;                    
-        params.channels = 1;                  
-        params.layout = CUBEB_LAYOUT_UNDEFINED;
-        params.prefs = CUBEB_STREAM_PREF_NONE; 
+            params.format = CUBEB_SAMPLE_FLOAT32NE; 
+            params.rate = rate;                    
+            params.channels = 1;                  
+            params.layout = CUBEB_LAYOUT_UNDEFINED;
+            params.prefs = CUBEB_STREAM_PREF_NONE; 
 
             int err = cubeb_stream_init(ctx, &stm, "Test", NULL, 
                 NULL, NULL, &params, latency, 

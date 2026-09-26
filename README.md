@@ -39,3 +39,6 @@ cmake .. && cmake --build . -j 16
 sudo apt install ccache libx11-dev libxtst-dev libxt-dev libxinerama-dev libx11-xcb-dev libxkbcommon-dev libxkbcommon-x11-dev libxkbfile-dev mold
 
 -DASAHI_NO_COMPILE_CLIENT=ON для того чтобы не компилировать клиент
+-DCMAKE_BUILD_TYPE=Debug для дебага
+
+sudo apt install qt6-base-dev qt6-tools-dev qt6-tools-dev-tools

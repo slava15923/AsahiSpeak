@@ -3,7 +3,8 @@ project(AsahiSpeak)
 
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
-option(ASAHI_NO_COMPILE_CLIENT "Enable custom cryptography mode" OFF)
+option(ASAHI_NO_COMPILE_CLIENT "" OFF)
+option(ASAHI_NO_COMPILE_SERVER "" OFF)
 
 if (MINGW)
     # Принудительно собираем все библиотеки как статические
@@ -71,18 +72,17 @@ add_subdirectory(wolfssl-5.9.2-stable)
 if(NOT ASAHI_NO_COMPILE_CLIENT)
     add_subdirectory(opus-1.5.2)
     add_subdirectory(ReNameNoise)
-    add_subdirectory(CLI11)
     add_subdirectory(cubeb)
-    add_executable(AsahiSpeak src/main.cpp)
+    add_subdirectory(cmakeImguiGLFW)
 
-    #target_compile_options(AsahiSpeak PRIVATE
-    #    $<$<C_COMPILER_ID:GNU,Clang>:-fno-inline -fno-inline-functions>
-    #    $<$<CXX_COMPILER_ID:GNU,Clang>:-fno-inline -fno-inline-functions>
-    #)
+    add_executable(AsahiSpeak 
+        src/main.cpp
+        src/gui/gui.cpp
+    )
 
     target_compile_features(AsahiSpeak PRIVATE cxx_std_20)
 
-    target_link_libraries(AsahiSpeak PRIVATE cubeb wolfssl opus renamenoise CLI11::CLI11)
+    target_link_libraries(AsahiSpeak PRIVATE cubeb wolfssl opus renamenoise imgui)
 
     target_include_directories(AsahiSpeak PUBLIC 
         ${PROJECT_SOURCE_DIR}/cubeb/include
@@ -92,12 +92,13 @@ if(NOT ASAHI_NO_COMPILE_CLIENT)
         ${PROJECT_SOURCE_DIR}/src
         ${PROJECT_SOURCE_DIR}/opus-1.5.2/include
         ${PROJECT_SOURCE_DIR}/ReNameNoise/include
-        ${PROJECT_SOURCE_DIR}/CLI11/include/CLI
         ${PROJECT_SOURCE_DIR}/readerwriterqueue
+        ${PROJECT_SOURCE_DIR}/cmakeImguiGLFW/glfw/include
+        ${PROJECT_SOURCE_DIR}/cmakeImguiGLFW/imgui
     )
 endif()
 
-if(NOT WIN32)
+if(NOT WIN32 AND NOT ASAHI_NO_COMPILE_SERVER)
     add_executable(AsahiSpeakServer src/server.cpp)
     target_compile_features(AsahiSpeakServer PRIVATE cxx_std_20)
     target_link_libraries(AsahiSpeakServer PRIVATE wolfssl)

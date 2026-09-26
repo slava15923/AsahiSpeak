@@ -1,5 +1,9 @@
 #pragma once
 
+#ifndef network15923
+
+#define network15923
+
 #ifdef _WIN32
     #define socket_t SOCKET
 
@@ -54,7 +58,7 @@ const int BIT_RATE = 64000;
 
 const int SERVER_TIME_OUT = 5;//в секундах
 
-void error_handling(const char *msg) {
+inline void error_handling(const char *msg) {
     fprintf(stderr, "Error: %s\n", msg);
 }
 
@@ -81,7 +85,7 @@ class serverUserData {
 
 };
 
-socket_t create_tcp_socket() {
+inline socket_t create_tcp_socket() {
     socket_t sock;
     // Используйте AF_INET и SOCK_STREAM, которые одинаковы для всех платформ
     sock = socket(AF_INET, SOCK_STREAM, 0);
@@ -89,7 +93,7 @@ socket_t create_tcp_socket() {
     return sock;
 }
 
-socket_t create_udp_socket() {
+inline socket_t create_udp_socket() {
     socket_t sock;
     // Используйте AF_INET и SOCK_STREAM, которые одинаковы для всех платформ
     sock = socket(AF_INET, SOCK_DGRAM, 0);
@@ -107,7 +111,7 @@ struct serverUdpData
 };
 
 
-std::string resolve_ip_or_dns(const std::string& host) {
+inline std::string resolve_ip_or_dns(const std::string& host) {
     // 1) Проверяем, является ли строка IP-адресом (без сетевых запросов)
     struct sockaddr_storage ss;
     socklen_t ss_len = sizeof(ss);
@@ -171,12 +175,7 @@ std::string resolve_ip_or_dns(const std::string& host) {
 
 // Настройка кривых генерации ключей ECDHE (X25519 в приоритете)
 inline void SetBrowserECCGroups(WOLFSSL_CTX* ctx) {
-    // Используем массив встроенных ID wolfSSL напрямую:
-    // WOLFSSL_ECC_X25519     -> x25519
-    // WOLFSSL_ECC_SECP256R1  -> P-256 (prime256v1)
     int groups[] = { WOLFSSL_ECC_X25519, WOLFSSL_ECC_SECP256R1 };
-    
-    // Функция wolfSSL_CTX_set_groups принимает массив ID и его длину
     if (wolfSSL_CTX_set_groups(ctx, groups, 2) != WOLFSSL_SUCCESS) {
         std::cerr << "Критическая ошибка: Кривые X25519 или P-256 не поддерживаются этой сборкой wolfSSL!" << std::endl;
     }
@@ -194,3 +193,5 @@ inline void SetBrowserDtls13Ciphers(WOLFSSL_CTX* ctx) {
         std::cerr << "Проверьте, включены ли HAVE_CHACHA и HAVE_AESGCM в user_settings.h" << std::endl;
     }
 }
+
+#endif

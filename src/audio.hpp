@@ -4,17 +4,12 @@
 #include <algorithm>
 #include <iostream>
 #include <cassert>
-#include <string>   // для std::string в setParam/getParam
+#include <string> 
 
-// -------------------------------------------------------------------
-// Базовый класс для всех алгоритмов шумоподавления
-// -------------------------------------------------------------------
 class AudioDenoiser {
 public:
     virtual ~AudioDenoiser() = default;
 
-    // Основной метод: обрабатывает входной буфер (указатель на float) 
-    // и записывает результат в выходной буфер. Размер буферов – numSamples.
     virtual void process(const float* input, float* output, size_t numSamples) = 0;
 
     // Установка/получение параметров (опционально)
@@ -22,22 +17,17 @@ public:
     virtual float getParam(const std::string& name) const { return 0.0f; }
 };
 
-// -------------------------------------------------------------------
-// 1. Спектральное вычитание (упрощённая версия без БПФ – демонстрация)
-//    В реальности требует оконного БПФ и обработки спектра.
-// -------------------------------------------------------------------
 class SpectralSubtractionDenoiser : public AudioDenoiser {
 private:
-    float noiseFloor_;      // оценка уровня шума (константа для простоты)
-    float oversubFactor_;   // коэффициент перевычитания
+    float noiseFloor_;
+    float oversubFactor_;
 
 public:
     SpectralSubtractionDenoiser(float noiseFloor = 0.01f, float oversub = 1.0f)
         : noiseFloor_(noiseFloor), oversubFactor_(oversub) {}
 
     void process(const float* input, float* output, size_t numSamples) override {
-        // Для демонстрации: простейшее пороговое подавление (аналог спектрального вычитания)
-        // В реальном алгоритме нужны: окна, БПФ, вычитание шума в спектре, обратное БПФ.
+
         for (size_t i = 0; i < numSamples; ++i) {
             float val = input[i];
             if (std::abs(val) < noiseFloor_) {
@@ -141,64 +131,3 @@ public:
         }
     }
 };
-
-class DoubleBuffer {
-public:
-    explicit DoubleBuffer(size_t size);
-    ~DoubleBuffer() = default;
-
-    // Получить указатель на текущий активный буфер для записи (без блокировки)
-    float* getWriteBuffer() noexcept;
-
-    // Переключить буферы: возвращает указатель на старый активный (с данными),
-    // активным становится бывший свободный (обнулённый). Вызывается под мьютексом.
-    float* swap();
-
-    // Вернуть буфер в пул свободных (после обнуления). Вызывается под мьютексом.
-    void releaseBuffer(float* buffer);
-
-    // Обнулить оба буфера (для инициализации)
-    void clear();
-
-private:
-    std::unique_ptr<float[]> bufA;
-    std::unique_ptr<float[]> bufB;
-    std::atomic<float*> active;   // текущий буфер для записи
-    float* free;                  // свободный буфер (обнулён, защищён мьютексом)
-    std::mutex mtx;               // защищает переключение и возврат
-    size_t size;
-};
-
-DoubleBuffer::DoubleBuffer(size_t size) : size(size) {
-    bufA = std::make_unique<float[]>(size);
-    bufB = std::make_unique<float[]>(size);
-    clear();
-    active = bufA.get();
-    free = bufB.get();
-}
-
-float* DoubleBuffer::getWriteBuffer() noexcept {
-    return active.load(std::memory_order_acquire);
-}
-
-float* DoubleBuffer::swap() {
-    std::lock_guard<std::mutex> lock(mtx);
-    float* oldActive = active.load(std::memory_order_relaxed);
-    // Меняем местами: активным становится свободный, свободным – старый активный
-    active.store(free, std::memory_order_release);
-    free = oldActive;
-    // Теперь free указывает на старый активный (который нужно обнулить после использования)
-    // Возвращаем oldActive для записи в readBuffer
-    return oldActive;
-}
-
-void DoubleBuffer::releaseBuffer(float* buffer) {
-    std::lock_guard<std::mutex> lock(mtx);
-    // Предполагается, что buffer уже обнулён вызывающим
-    free = buffer;
-}
-
-void DoubleBuffer::clear() {
-    std::fill(bufA.get(), bufA.get() + size, 0.0f);
-    std::fill(bufB.get(), bufB.get() + size, 0.0f);
-}

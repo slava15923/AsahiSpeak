@@ -201,7 +201,7 @@ public:
     socket_t get_handle() const { return m_sock; }
 };
 
-bool init_network() {
+inline bool init_network() {
 #if defined(_WIN32)
     WSADATA wsaData;
     return WSAStartup(MAKEWORD(2, 2), &wsaData) == 0;
@@ -209,7 +209,7 @@ bool init_network() {
     return true;
 }
 
-void cleanup_network() {
+inline void cleanup_network() {
 #if defined(_WIN32)
     WSACleanup();
 #endif

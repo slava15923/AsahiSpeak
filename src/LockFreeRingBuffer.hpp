@@ -160,7 +160,21 @@ public:
         // просто заставит ожидающего проснуться и перечитать size_approx().
     }
 
+    void mute() {
+        isMuted.test_and_set();
+    }
+
+    void unmute() {
+        isMuted.clear();
+    }
+
+    //true - mute; false - no mute
+    bool getStatusMute() {
+        return isMuted.test();
+    }
+
 private:
+    std::atomic_flag isMuted;
     const size_t capacity;
     moodycamel::ReaderWriterQueue<float> queue;
 
